@@ -995,19 +995,21 @@ void Event::IParserBase::ProceedOnce(Deserializer& der)
 
 Event::Type::Enum Event::Type::Load(Deserializer& der)
 {
-    Type::Enum eType;
+    Type::Enum eType = Type::Utxo0;
     auto bytesLeft = der.bytes_left();
     try
     {
+        LOG_INFO() << "Event::Type::Load "<< TRACE(bytesLeft);
         der& eType;
     }
     catch (const yas::io_exception&)
     {
+        LOG_INFO() << "Event::Type::Load exception "<< TRACE(bytesLeft);
         // workaround for the case whe enum was serialized as unsigned integer #1622
         // TODO: remove after fork
         while (der.bytes_left() < bytesLeft)
             der.ungetch();
-
+        LOG_INFO() << "Event::Type::Load exception " << der.bytes_left();
         enum Enum2 : int32_t {
 #define THE_MACRO(id, name) name = id,
             BeamEventsAll(THE_MACRO)
@@ -1016,7 +1018,14 @@ Event::Type::Enum Event::Type::Load(Deserializer& der)
         Enum2 eType2;
         der& eType2;
         eType = static_cast<Type::Enum>(eType2);
+        LOG_INFO() << "Event::Type::Load exception eType=" << eType;
     }
+    catch (const std::exception& ex)
+    {
+        LOG_INFO() << "Event::Type::Load exception unknown exception";
+        LOG_INFO() << ex.what();
+    }
+    LOG_INFO() << "eType == " << eType;
     return eType;
 }
 
