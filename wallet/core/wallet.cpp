@@ -449,6 +449,11 @@ namespace beam::wallet
         return false;
     }
 
+    bool Wallet::MyRequestBodyPack::operator < (const MyRequestBodyPack& x) const
+    {
+        return false;
+    }
+
     void Wallet::RequestHandler::OnComplete(Request& r)
     {
         uint32_t n = get_ParentObj().SyncRemains();
@@ -690,8 +695,7 @@ namespace beam::wallet
         case TxType::VoucherRequest:
             {
                 auto pKeyKeeper = m_WalletDB->get_KeyKeeper();
-                if (!pKeyKeeper             // We can generate the ticket with OwnerKey, but can't sign it.
-                 || !m_OwnedNodesOnline)    // The wallet has no ability to recognoize received shielded coin
+                if (!pKeyKeeper)             // We can generate the ticket with OwnerKey, but can't sign it.
                 {
                     FailVoucherRequest(msg.m_From, myID);
                     return; 
@@ -1080,14 +1084,28 @@ namespace beam::wallet
     {
     }
 
+    void Wallet::OnRequestComplete(MyRequestBodyPack& r)
+    {
+        //r.m_Res.m_Body.m_Eternal
+    }
+
 
     void Wallet::RequestEvents()
     {
-        if (!m_OwnedNodesOnline)
-            return;
-
         Block::SystemState::Full sTip;
         m_WalletDB->get_History().get_Tip(sTip);
+        if (!m_OwnedNodesOnline)
+        {
+            MyRequestBodyPack::Ptr pReq(new MyRequestBodyPack);
+            pReq->m_Msg.m_FlagP = proto::BodyBuffers::None;
+            pReq->m_Msg.m_FlagE = proto::BodyBuffers::Full;
+            sTip.get_ID(pReq->m_Msg.m_Top);
+            if (PostReqUnique(*pReq))
+            {
+                LOG_INFO() << "Requesting block pack for " << pReq->m_Msg.m_Top;
+            }
+            return;
+        }
 
         Height h = GetEventsHeightNext();
         assert(h <= sTip.m_Height + 1);

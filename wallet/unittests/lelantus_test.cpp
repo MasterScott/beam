@@ -547,7 +547,6 @@ void TestDirectAnonymousPayment()
             }
             else if (cursor.m_Sid.m_Height == 26)
             {
-                // third attempt should fail - all vouchers have been used
                 auto parameters = lelantus::CreatePushTransactionParameters(sender.m_WalletID)
                     .SetParameter(TxParameterID::Amount, 18000000)
                     .SetParameter(TxParameterID::Fee, 12000000)
@@ -557,31 +556,14 @@ void TestDirectAnonymousPayment()
             
                 sender.m_Wallet.StartTransaction(parameters);
             }
-            // TODO: commented PullTransaction is outdated doesn't work
-            //else if (cursor.m_Sid.m_Height == 40)
-            //{
-            //    auto parameters = lelantus::CreatePullTransactionParameters(receiver.m_WalletID)
-            //        .SetParameter(TxParameterID::Amount, 6000000)
-            //        .SetParameter(TxParameterID::Fee, 12000000)
-            //        .SetParameter(TxParameterID::ShieldedOutputId, 0U);
-            //
-            //    receiver.m_Wallet.StartTransaction(parameters);
-            //
-            //    parameters = lelantus::CreatePullTransactionParameters(receiver.m_WalletID)
-            //        .SetParameter(TxParameterID::Amount, 6000000)
-            //        .SetParameter(TxParameterID::Fee, 12000000)
-            //        .SetParameter(TxParameterID::ShieldedOutputId, 1U);
-            //    
-            //    receiver.m_Wallet.StartTransaction(parameters);
-            //}
-
             else if (cursor.m_Sid.m_Height == 50)
             {
                 mainReactor->stop();
             }
         });
 
-    InitOwnNodeToTest(node, binaryTreasury, &observer, receiver.m_WalletDB->get_MasterKdf(), 32125, 200);
+    // intentionally with sender owner key, receiver should get events from blocks by himself
+    InitOwnNodeToTest(node, binaryTreasury, &observer, sender.m_WalletDB->get_MasterKdf(), 32125, 200);
 
     mainReactor->run();
 
@@ -595,6 +577,7 @@ void TestDirectAnonymousPayment()
     }
     {
         auto txHistory = receiver.m_WalletDB->getTxHistory(TxType::ALL);
+        WALLET_CHECK(txHistory.size() == 3);
         WALLET_CHECK(std::all_of(txHistory.begin(), txHistory.end(), [](const auto& tx)
         {
             return (tx.m_txType == TxType::PushTransaction) && tx.m_status == TxStatus::Completed;
@@ -1381,9 +1364,9 @@ int main()
 
     //TestUnlinkTx();
     //TestCancelUnlinkTx();
-    TestSimpleTx();
-    TestMaxPrivacyTx();
-    TestPublicAddressTx();
+//    TestSimpleTx();
+//    TestMaxPrivacyTx();
+//    TestPublicAddressTx();
     TestDirectAnonymousPayment();
     TestManyTransactons(20, Lelantus::Cfg{2, 5}, Lelantus::Cfg{2, 3});
     TestManyTransactons(40, Lelantus::Cfg{ 2, 5 }, Lelantus::Cfg{ 2, 3 });

@@ -916,6 +916,15 @@ bool FlyClient::NetworkStd::Connection::IsSupported(RequestBbsMsg& req)
     return (LoginFlags::Bbs & m_LoginFlags) && IsAtTip();
 }
 
+bool FlyClient::NetworkStd::Connection::IsSupported(RequestBodyPack& req)
+{
+    return (Flags::Node & m_Flags) && IsAtTip();
+}
+
+void FlyClient::NetworkStd::Connection::OnRequestData(RequestBodyPack& req)
+{
+}
+
 void FlyClient::NetworkStd::Connection::SendRequest(RequestBbsMsg& req)
 {
 	Send(req.m_Msg);
