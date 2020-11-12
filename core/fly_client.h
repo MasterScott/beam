@@ -45,7 +45,8 @@ namespace proto {
 		macro(ProofShieldedOutp, GetProofShieldedOutp, ProofShieldedOutp) \
 		macro(BbsMsg,            BbsMsg,               Pong) \
 		macro(Asset,             GetProofAsset,        ProofAsset) \
-		macro(StateSummary,      GetStateSummary,      StateSummary)
+		macro(StateSummary,      GetStateSummary,      StateSummary) \
+		macro(BodyPack,          GetBodyPack,          Body)
 
 		class Request
 		{
