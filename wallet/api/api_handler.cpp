@@ -185,10 +185,9 @@ namespace beam::wallet
     {
     }
 
-    void WalletApiHandler::doError(const JsonRpcId& id, ApiError code, const std::string& data)
+    void WalletApiHandler::getError(const JsonRpcId& id, ApiError code, const std::string& data, json& error)
     {
-        json msg
-        {
+        error = json {
             {"jsonrpc", "2.0"},
             {"id", id},
             {"error",
@@ -201,10 +200,8 @@ namespace beam::wallet
 
         if (!data.empty())
         {
-            msg["error"]["data"] = data;
+            error["error"]["data"] = data;
         }
-
-        serializeMsg(msg);
     }
 
     void WalletApiHandler::onInvalidJsonRpc(const json& msg)
@@ -324,23 +321,34 @@ namespace beam::wallet
 
     void WalletApiHandler::onMessage(const JsonRpcId& id, const ValidateAddress& data)
     {
-        LOG_DEBUG() << "ValidateAddress( address = " << std::to_string(data.address) << ")";
+        LOG_DEBUG() << "ValidateAddress( address = " << data.address << ")";
 
-        auto walletDB = _walletData.getWalletDBPtr();
-        if (!walletDB) {
-            return doError(id, ApiError::NotOpenedError);
-        }
+        auto p = ParseParameters(data.address);
 
-        bool isValid = data.address.IsValid();
+        bool isValid = !!p;
         bool isMine = false;
 
-        auto addr = walletDB->getAddress(data.address);
-        if (addr)
+        if (p)
         {
-            isMine = addr->isOwn();
-            if (isMine)
+            if (auto v = p->GetParameter<WalletID>(TxParameterID::PeerID); v)
             {
-                isValid = isValid && !addr->isExpired();
+                isValid &= v->IsValid();
+
+                auto walletDB = _walletData.getWalletDBPtr();
+                if (!walletDB)
+                {
+                    return doError(id, ApiError::NotOpenedError);
+                }
+
+                auto addr = walletDB->getAddress(*v);
+                if (addr)
+                {
+                    isMine = addr->isOwn();
+                    if (isMine)
+                    {
+                        isValid = isValid && !addr->isExpired();
+                    }
+                }
             }
         }
         doResponse(id, ValidateAddress::Response{ isValid, isMine });
@@ -845,11 +853,11 @@ namespace beam::wallet
         doResponse(id, response);
     }
 
-    void WalletApiHandler::onMessage(const JsonRpcId& id, const WalletStatus& data)
+    void WalletApiHandler::onMessage(const JsonRpcId& id, const WalletStatusApi& data)
     {
         LOG_DEBUG() << "WalletStatus(id = " << id << ")";
 
-        WalletStatus::Response response;
+        WalletStatusApi::Response response;
         auto walletDB = _walletData.getWalletDBPtr();
         if (!walletDB) {
             return doError(id, ApiError::NotOpenedError);

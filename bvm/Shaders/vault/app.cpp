@@ -1,8 +1,7 @@
 ////////////////////////
 // Simple 'vault' shader
-#include "common.h"
-#include "vault.h"
-#include "Math.h"
+#include "../common.h"
+#include "contract.h"
 
 struct DocGroup {
     DocGroup(const char* sz) {
@@ -207,7 +206,7 @@ void On_MyAccount_MoveFunds(uint32_t iMethod, uint8_t nConsume, const ContractID
         return;
     }
 
-    Env::DocGetNum("assert", arg.m_Aid);
+    Env::DocGetNum("asset", arg.m_Aid);
     DeriveMyPk(arg.m_Account, cid);
 
     FundsChange fc;

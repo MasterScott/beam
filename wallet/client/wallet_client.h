@@ -22,12 +22,13 @@
 #include "wallet/core/private_key_keeper.h"
 #include "wallet/core/common_utils.h"
 #include "wallet_model_async.h"
-#include "wallet/client/changes_collector.h"
-#include "wallet/client/extensions/notifications/notification_observer.h"
-#include "wallet/client/extensions/notifications/notification_center.h"
-#include "wallet/client/extensions/broadcast_gateway/interface.h"
-#include "wallet/client/extensions/broadcast_gateway/broadcast_msg_validator.h"
-#include "wallet/client/extensions/news_channels/exchange_rate_provider.h"
+#include "changes_collector.h"
+#include "extensions/notifications/notification_observer.h"
+#include "extensions/notifications/notification_center.h"
+#include "extensions/broadcast_gateway/interface.h"
+#include "extensions/broadcast_gateway/broadcast_msg_validator.h"
+#include "extensions/news_channels/exchange_rate_provider.h"
+#include "extensions/shaders/shaders_manager.h"
 #ifdef BEAM_ATOMIC_SWAP_SUPPORT
 #include "wallet/client/extensions/offers_board/swap_offers_observer.h"
 #include "wallet/client/extensions/offers_board/swap_offer.h"
@@ -39,6 +40,13 @@
 
 namespace beam::wallet
 {
+#if defined(BEAM_TESTNET)
+    constexpr char kBroadcastValidatorPublicKey[] = "dc3df1d8cd489c3fe990eb8b4b8a58089a7706a5fc3b61b9c098047aac2c2812";
+#elif defined(BEAM_MAINNET)
+    constexpr char kBroadcastValidatorPublicKey[] = "8ea783eced5d65139bbdf432814a6ed91ebefe8079395f63a13beed1dfce39da";
+#else
+    constexpr char kBroadcastValidatorPublicKey[] = "db617cedb17543375b602036ab223b67b06f8648de2bb04de047f485e7a9daec";
+#endif
     struct WalletStatus
     {
         struct AssetStatus
@@ -78,6 +86,7 @@ namespace beam::wallet
         , private INodeConnectionObserver
         , private IExchangeRateObserver
         , private INotificationsObserver
+        , private ShadersManager::IDone
     {
     public:
         WalletClient(IWalletDB::Ptr walletDB, const std::string& nodeAddr, io::Reactor::Ptr reactor);
@@ -88,6 +97,8 @@ namespace beam::wallet
                     std::shared_ptr<std::unordered_map<TxType, BaseTransaction::Creator::Ptr>> txCreators = nullptr);
 
         IWalletModelAsync::Ptr getAsync();
+        Wallet::Ptr getWallet(); // can return null
+
         std::string getNodeAddress() const;
         std::string exportOwnerKey(const beam::SecString& pass) const;
         bool isRunning() const;
@@ -150,6 +161,7 @@ namespace beam::wallet
         virtual void onPostFunctionToClientContext(MessageFunction&& func) {}
         virtual void onExportTxHistoryToCsv(const std::string& data) {}
         virtual void onAssetInfo(Asset::ID assetId, const WalletAsset&) {}
+
         virtual Version getLibVersion() const;
         virtual uint32_t getClientRevision() const;
         void onExchangeRates(const std::vector<ExchangeRate>&) override {}
@@ -211,6 +223,8 @@ namespace beam::wallet
         void exportDataToJson() override;
         void exportTxHistoryToCsv() override;
         void getAssetInfo(const Asset::ID) override;
+        void makeIWTCall(std::function<boost::any()>&& function, AsyncCallback<boost::any>&& resultCallback) override;
+        void callShader(const std::vector<uint8_t>& shader, const std::string& args, ShaderCallback&& cback) override;
 
         void switchOnOffExchangeRates(bool isActive) override;
         void switchOnOffNotifications(Notification::Type type, bool isActive) override;
@@ -238,6 +252,13 @@ namespace beam::wallet
         bool isConnected() const;
 
     private:
+        //
+        // Shaders support
+        //
+        ShaderCallback _shaderCback;
+        std::weak_ptr<ShadersManager> _smgr;
+        void onShaderDone() override;
+
         // Asset info can be requested multiple times for the same ID
         // We collect all such events and process them in bulk at
         // the end of the libuv cycle ignoring duplicate reuqests

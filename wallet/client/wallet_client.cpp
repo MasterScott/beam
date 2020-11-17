@@ -34,14 +34,6 @@ using namespace beam::wallet;
 
 const size_t kCollectorBufferSize = 50;
 
-#if defined(BEAM_TESTNET)
-const char kBroadcastValidatorPublicKey[] = "dc3df1d8cd489c3fe990eb8b4b8a58089a7706a5fc3b61b9c098047aac2c2812";
-#elif defined(BEAM_MAINNET)
-const char kBroadcastValidatorPublicKey[] = "8ea783eced5d65139bbdf432814a6ed91ebefe8079395f63a13beed1dfce39da";
-#else
-const char kBroadcastValidatorPublicKey[] = "db617cedb17543375b602036ab223b67b06f8648de2bb04de047f485e7a9daec";
-#endif
-
 using WalletSubscriber = ScopedSubscriber<wallet::IWalletObserver, wallet::Wallet>;
 
 struct WalletModelBridge : public Bridge<IWalletModelAsync>
@@ -295,6 +287,16 @@ struct WalletModelBridge : public Bridge<IWalletModelAsync>
     {
         call_async(&IWalletModelAsync::getAssetInfo, assetId);
     }
+
+    void makeIWTCall(std::function<boost::any()>&& function, AsyncCallback<boost::any>&& resultCallback) override
+    {
+        call_async(&IWalletModelAsync::makeIWTCall, std::move(function), std::move(resultCallback));
+    }
+
+    void callShader(const std::vector<uint8_t>& shader, const std::string& args, ShaderCallback&& cback) override
+    {
+        call_async(&IWalletModelAsync::callShader, shader, args, cback);
+    }
 };
 }
 
@@ -496,11 +498,18 @@ namespace beam::wallet
                 auto notificationsDbSubscriber = make_unique<WalletDbSubscriber>(
                     static_cast<IWalletDbObserver*>(m_notificationCenter.get()), m_walletDB);
 
+                // shaders
+                auto shadersManager = std::make_shared<ShadersManager>(m_walletDB, nodeNetwork, *static_cast<ShadersManager::IDone*>(this));
+                _smgr = shadersManager;
+
                 nodeNetwork->tryToConnect();
                 m_reactor->run_ex([&wallet, &nodeNetwork](){
                     wallet->CleanupNetwork();
                     nodeNetwork->Disconnect();
                 });
+
+                assert(shadersManager.use_count() == 1);
+                shadersManager.reset();
 
                 assert(walletNetwork.use_count() == 1);
                 walletNetwork.reset();
@@ -530,6 +539,12 @@ namespace beam::wallet
     IWalletModelAsync::Ptr WalletClient::getAsync()
     {
         return m_async;
+    }
+
+    Wallet::Ptr WalletClient::getWallet()
+    {
+        auto sp = m_wallet.lock();
+        return sp;
     }
 
     std::string WalletClient::getNodeAddress() const
@@ -1287,11 +1302,7 @@ namespace beam::wallet
 
     void WalletClient::getPublicAddress()
     {
-        TxParameters params;
-        params.SetParameter(TxParameterID::TransactionType, beam::wallet::TxType::PushTransaction);
-        params.SetParameter(TxParameterID::PublicAddreessGen, GeneratePublicAddress(*m_walletDB->get_OwnerKdf(), 0));
-        AppendLibraryVersion(params);
-        onPublicAddress(std::to_string(params));
+        onPublicAddress(GeneratePublicOfflineAddress(*m_walletDB));
     }
 
     void WalletClient::generateVouchers(uint64_t ownID, size_t count, AsyncCallback<ShieldedVoucherList>&& callback)
@@ -1487,5 +1498,115 @@ namespace beam::wallet
                 onAssetInfo(assetId, *oasset);
             }
         }
+    }
+
+    void WalletClient::makeIWTCall(std::function<boost::any()>&& function, AsyncCallback<boost::any>&& resultCallback)
+    {
+        auto result = function();
+        postFunctionToClientContext([result, cb = std::move(resultCallback)]()
+        {
+            cb(result);
+        });
+    }
+
+    void WalletClient::callShader(const std::vector<uint8_t>& shader, const std::string& args, ShaderCallback&& cback)
+    {
+        auto smgr = _smgr.lock();
+        if (!smgr)
+        {
+            assert(false);
+            postFunctionToClientContext([cb = std::move(cback)]() {
+                cb("unexpected: m_wallet is null", "");
+            });
+            return;
+        }
+
+        if (_shaderCback || !smgr->IsDone()) {
+            postFunctionToClientContext([cb = std::move(cback)]() {
+                cb("previous call is not finished", "");
+            });
+            return;
+        }
+
+        try
+        {
+            if (!shader.empty())
+            {
+                smgr->Compile(shader, ShadersManager::Kind::Manager);
+            }
+        }
+        catch(std::runtime_error& err)
+        {
+            postFunctionToClientContext([cb = std::move(cback), msg = err.what()]() {
+                cb(msg, "");
+            });
+            return;
+        }
+
+        _shaderCback = std::move(cback);
+
+        try
+        {
+            smgr->Start(args, args.empty() ? 0 : 1);
+        }
+        catch(const std::runtime_error& err)
+        {
+            postFunctionToClientContext([cb = std::move(_shaderCback), msg = err.what()]() {
+                cb(msg, "");
+            });
+
+            decltype(_shaderCback)().swap(_shaderCback);
+            return;
+        }
+    }
+
+    void WalletClient::onShaderDone()
+    {
+        if (!_shaderCback)
+        {
+            assert(false);
+            LOG_ERROR() << "onShaderDone but empty callback";
+            return;
+        }
+
+        auto smgr = _smgr.lock();
+        if (!smgr)
+        {
+            assert(false);
+            LOG_ERROR() << "onShaderDone but empty manager";
+            postFunctionToClientContext([cb = std::move(_shaderCback)]() {
+                cb("onShaderDone but empty manager", "");
+            });
+            return;
+        }
+
+        if (smgr->IsError())
+        {
+             postFunctionToClientContext([err = smgr->GetError(), cb = std::move(_shaderCback)]() {
+                cb(err, "");
+            });
+            return;
+        }
+
+        // TODO: handle errors
+        auto invoke = smgr->GetInvokeData();
+        if (!invoke.empty())
+        {
+            auto params = CreateTransactionParameters(TxType::Contract)
+                    .SetParameter(TxParameterID::ContractDataPacked, invoke);
+
+            auto spw = m_wallet.lock();
+            if (spw)
+            {
+                auto txid = spw->StartTransaction(params);
+                LOG_INFO() << "Transaction created: " << txid;
+            }
+        }
+
+        postFunctionToClientContext([res = smgr->GetResult(), cb = std::move(_shaderCback)]() {
+            cb("", res);
+        });
+
+        assert(!_shaderCback);
     }
 }
