@@ -28,6 +28,7 @@
 #include <random>
 #include <iomanip>
 #include <numeric>
+#include "node/processor.h"
 
 namespace beam::wallet
 {
@@ -1069,7 +1070,76 @@ namespace beam::wallet
 
     void Wallet::OnRequestComplete(MyRequestBodyPack& r)
     {
-        //r.m_Res.m_Body.m_Eternal
+        struct RecognizerHandler : NodeProcessor::Recognizer::IHandler
+        {
+            Wallet& m_Wallet;
+            Key::IPKdf::Ptr m_pOwner;
+            std::vector<ShieldedTxo::Viewer> m_vSh;
+            RecognizerHandler(Wallet& wallet, const Key::IPKdf::Ptr& pKdf, Key::Index nMaxShieldedIdx = 1)
+                : m_Wallet(wallet)
+                , m_pOwner(pKdf)
+            {
+                if (pKdf)
+                {
+                    m_vSh.resize(nMaxShieldedIdx);
+
+                    for (Key::Index nIdx = 0; nIdx < nMaxShieldedIdx; nIdx++)
+                        m_vSh[nIdx].FromOwner(*pKdf, nIdx);
+                }
+            }
+            void get_ViewerKeys(NodeProcessor::ViewerKeys& vk) override
+            {
+                vk.m_pMw = m_pOwner.get();
+
+                vk.m_nSh = static_cast<Key::Index>(m_vSh.size());
+                if (vk.m_nSh)
+                    vk.m_pSh = &m_vSh.front();
+            }
+
+            void OnEvent(Height h, const proto::Event::Base& evt) override
+            {
+                switch (evt.get_Type())
+                {
+                case proto::Event::Type::Utxo:
+                    {
+                        auto event = Cast::Up<const proto::Event::Utxo&>(evt);
+                        // filter-out false positives
+                        if (!m_Wallet.m_WalletDB->IsRecoveredMatch(event.m_Cid, event.m_Commitment))
+                            return;
+
+                        bool bAdd = 0 != (proto::Event::Flags::Add & event.m_Flags);
+                        m_Wallet.ProcessEventUtxo(event.m_Cid, h, event.m_Maturity, bAdd, event.m_User);
+                    }break;
+                case proto::Event::Type::Shielded:
+                    {
+                        auto event = Cast::Up<const proto::Event::Shielded&>(evt);
+                        m_Wallet.ProcessEventShieldedUtxo(event, h);
+                    }break;
+                }
+                
+            }
+        };
+        RecognizerHandler h(*this, m_WalletDB->get_MasterKdf());
+        NodeProcessor::Extra extra = { 0 };
+        NodeProcessor::Recognizer recognizer(h, extra);
+        Block::Body block;
+        try {
+            Deserializer der;
+            der.reset(r.m_Res.m_Body.m_Perishable);
+            der& Cast::Down<Block::BodyBase>(block);
+            der& Cast::Down<TxVectors::Perishable>(block);
+
+            der.reset(r.m_Res.m_Body.m_Eternal);
+            der& Cast::Down<TxVectors::Eternal>(block);
+        }
+        catch (const std::exception&)
+        {
+            LOG_WARNING()  << "Wallet: block deserialization failed";
+            return;
+        }
+        Block::SystemState::Full tip;
+        get_tip(tip);
+        recognizer.Recognize(block, tip.m_Height, 0, false);
     }
 
     void Wallet::RequestEvents()
@@ -1079,7 +1149,7 @@ namespace beam::wallet
         if (!m_OwnedNodesOnline)
         {
             MyRequestBodyPack::Ptr pReq(new MyRequestBodyPack);
-            pReq->m_Msg.m_FlagP = proto::BodyBuffers::None;
+            pReq->m_Msg.m_FlagP = proto::BodyBuffers::Full;
             pReq->m_Msg.m_FlagE = proto::BodyBuffers::Full;
             sTip.get_ID(pReq->m_Msg.m_Top);
             if (PostReqUnique(*pReq))
