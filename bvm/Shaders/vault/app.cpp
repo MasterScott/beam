@@ -1,5 +1,3 @@
-////////////////////////
-// Simple 'vault' shader
 #include "../common.h"
 #include "contract.h"
 
@@ -12,56 +10,67 @@ struct DocGroup {
     }
 };
 
-struct DocNamedGroup
-    :public DocGroup
-{
-    DocNamedGroup(const char* sz, const char* szName)
-        :DocGroup(sz)
-    {
-        Env::DocAddText("name", szName);
-    }
-};
+#define Vault_manager_create(macro)
+#define Vault_manager_view(macro)
+#define Vault_manager_destroy(macro) macro(ContractID, cid)
+#define Vault_manager_view_accounts(macro) macro(ContractID, cid)
+
+#define Vault_manager_view_account(macro) \
+    macro(ContractID, cid) \
+    macro(PubKey, pubKey)
+
+#define VaultRole_manager(macro) \
+    macro(manager, create) \
+    macro(manager, destroy) \
+    macro(manager, view) \
+    macro(manager, view_accounts) \
+    macro(manager, view_account)
+
+#define Vault_my_account_view(macro) macro(ContractID, cid)
+
+#define Vault_my_account_deposit(macro) \
+    macro(ContractID, cid) \
+    macro(Amount, amount) \
+    macro(AssetID, aid)
+
+#define Vault_my_account_withdraw(macro) Vault_my_account_deposit(macro)
+
+#define Vault_my_account_move(macro) \
+    macro(uint8_t, isDeposit) \
+    Vault_my_account_deposit(macro)
+
+#define VaultRole_my_account(macro) \
+    macro(my_account, view) \
+    macro(my_account, deposit) \
+    macro(my_account, withdraw)
+
+#define VaultRoles_All(macro) \
+    macro(manager) \
+    macro(my_account)
 
 export void Method_0()
 {
     // scheme
     {   DocGroup gr("roles");
-        {   DocNamedGroup gr0("manager", "Manager");
-            {   DocNamedGroup gr1("create", "Create new");
-            }
-            {   DocNamedGroup gr1("destroy", "Destroy");
-                Env::DocAddText("cid", "ContractID");
-            }
-            {   DocNamedGroup gr1("view", "View");
-            }
-        }
-        {   DocNamedGroup gr0("my_account", "My account");
-            {   DocNamedGroup gr1("view", "View");
-                Env::DocAddText("cid", "ContractID");
-            }
-            {   DocNamedGroup gr1("deposit", "Deposit");
-                Env::DocAddText("cid", "ContractID");
-                Env::DocAddText("amount", "Amount");
-                Env::DocAddText("asset", "AssetID");
-            }
-            {   DocNamedGroup gr1("withdraw", "Withdraw");
-                Env::DocAddText("cid", "ContractID");
-                Env::DocAddText("amount", "Amount");
-                Env::DocAddText("asset", "AssetID");
-            }
-        }
-        {   DocNamedGroup gr0("all_accounts", "All accounts");
-            {   DocNamedGroup gr1("view", "View");
-                Env::DocAddText("cid", "ContractID");
-                Env::DocAddText("account", "PubKey");
-            }
-        }
+
+#define THE_FIELD(type, name) Env::DocAddText(#name, #type);
+#define THE_METHOD(role, name) { DocGroup grMethod(#name);  Vault_##role##_##name(THE_FIELD) }
+#define THE_ROLE(name) { DocGroup grRole(#name); VaultRole_##name(THE_METHOD) }
+        
+        VaultRoles_All(THE_ROLE)
+#undef THE_ROLE
+#undef THE_METHOD
+#undef THE_FIELD
     }
 }
 
-#ifndef assert
-#   define assert(x) do {} while (false)
-#endif // assert
+#define THE_FIELD(type, name) const type& name,
+#define ON_METHOD(role, name) void On_##role##_##name(Vault_##role##_##name(THE_FIELD) int unused = 0)
+
+void OnError(const char* sz)
+{
+    Env::DocAddText("error", sz);
+}
 
 #pragma pack (push, 1)
 
@@ -90,15 +99,15 @@ void EnumAndDump()
         if (!Env::VarsMoveNext((const void**) &pRawKey, &nKey, (const void**) &pVal, &nVal))
             break;
 
-        assert((sizeof(*pRawKey) == nKey) && (sizeof(*pVal) == nVal));
-
-        // alignment isn't important for bvm
-
-        Env::DocAddGroup("elem");
-        Env::DocAddBlob("Account", &pRawKey->m_Key.m_Account, sizeof(pRawKey->m_Key.m_Account));
-        Env::DocAddNum("AssetID", pRawKey->m_Key.m_Aid);
-        Env::DocAddNum("Amount", *pVal);
-        Env::DocCloseGroup();
+        if ((sizeof(*pRawKey) == nKey) && (sizeof(*pVal) == nVal))
+        {
+            // alignment isn't important for bvm
+            Env::DocAddGroup("elem");
+            Env::DocAddBlob("Account", &pRawKey->m_Key.m_Account, sizeof(pRawKey->m_Key.m_Account));
+            Env::DocAddNum("AssetID", pRawKey->m_Key.m_Aid);
+            Env::DocAddNum("Amount", *pVal);
+            Env::DocCloseGroup();
+        }
     }
 }
 
@@ -117,7 +126,7 @@ void DumpAccount(const PubKey& pubKey, const ContractID& cid)
     EnumAndDump();
 }
 
-void On_ManagerView()
+ON_METHOD(manager, view)
 {
 
 #pragma pack (push, 1)
@@ -153,30 +162,31 @@ void On_ManagerView()
     }
 }
 
-void On_Manager(const char* szAction, const ContractID* pCid)
+ON_METHOD(manager, create)
 {
-    if (!Env::Strcmp(szAction, "create")) {
-        Env::GenerateKernel(nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, 1000000U);
-        return;
-    }
+    Env::GenerateKernel(nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, 1000000U);
+}
 
-    if (!Env::Strcmp(szAction, "view")) {
-        On_ManagerView();
-        return;
-    }
+ON_METHOD(manager, destroy)
+{
+    Env::GenerateKernel(&cid, 1, nullptr, 0, nullptr, 0, nullptr, 0, 1000000U);
+}
 
-    if (!Env::Strcmp(szAction, "destroy")) {
+ON_METHOD(manager, view_accounts)
+{
+    KeyPrefix k0, k1;
+    k0.m_Cid = cid;
+    k0.m_Tag = 0;
+    k1.m_Cid = cid;
+    k1.m_Tag = 1;
 
-        if (!pCid) {
-            Env::DocAddText("error", "cid missing");
-            return;
-        }
+    Env::VarsEnum(&k0, sizeof(k0), &k1, sizeof(k1)); // enum all internal contract vars
+    EnumAndDump();
+}
 
-        Env::GenerateKernel(pCid, 1, nullptr, 0, nullptr, 0, nullptr, 0, 1000000U);
-        return;
-    }
-
-    Env::DocAddText("error", "invalid action");
+ON_METHOD(manager, view_account)
+{
+    DumpAccount(pubKey, cid);
 }
 
 #pragma pack (push, 1)
@@ -195,116 +205,90 @@ void DeriveMyPk(PubKey& pubKey, const ContractID& cid)
     Env::DerivePk(pubKey, &myid, sizeof(myid));
 }
 
-void On_MyAccount_MoveFunds(uint32_t iMethod, uint8_t nConsume, const ContractID& cid)
+ON_METHOD(my_account, move)
 {
+    if (!amount)
+        return OnError("amount should be nnz");
+
     Vault::Request arg;
-
-    Env::DocGetNum("amount", arg.m_Amount);
-    if (!arg.m_Amount)
-    {
-        Env::DocAddText("error", "amount should be nnz");
-        return;
-    }
-
-    Env::DocGetNum("asset", arg.m_Aid);
+    arg.m_Amount = amount;
+    arg.m_Aid = aid;
     DeriveMyPk(arg.m_Account, cid);
 
     FundsChange fc;
     fc.m_Amount = arg.m_Amount;
     fc.m_Aid = arg.m_Aid;
-    fc.m_Consume = nConsume;
+    fc.m_Consume = isDeposit;
 
-    MyAccountID myid;
-    myid.m_Cid = cid;
-
-    SigRequest sig;
-    sig.m_pID = &myid;
-    sig.m_nID = sizeof(myid);
-
-    Env::GenerateKernel(&cid, iMethod, &arg, sizeof(arg), &fc, 1, &sig, !nConsume, 2000000U);
-}
-
-void On_MyAccount(const char* szAction, const ContractID& cid)
-{
-    if (!Env::Strcmp(szAction, "view")) {
-
-        PubKey pubKey;
-        DeriveMyPk(pubKey, cid);
-        DumpAccount(pubKey, cid);
-        return;
-    }
-
-    if (!Env::Strcmp(szAction, "deposit"))
-    {
-        On_MyAccount_MoveFunds(Vault::Deposit::s_iMethod, 1, cid);
-        return;
-    }
-
-    if (!Env::Strcmp(szAction, "withdraw"))
-    {
-        On_MyAccount_MoveFunds(Vault::Withdraw::s_iMethod, 0, cid);
-        return;
-    }
-
-    Env::DocAddText("error", "invalid action");
-}
-
-void On_AllAccounts(const char* szAction, const ContractID& cid)
-{
-    if (!Env::Strcmp(szAction, "view")) {
-        PubKey pubKey;
-
-        if (Env::DocGetBlob("account", &pubKey, sizeof(pubKey)) == sizeof(pubKey))
-            DumpAccount(pubKey, cid);
-        else
-        {
-            KeyPrefix k0, k1;
-            k0.m_Cid = cid;
-            k0.m_Tag = 0;
-            k1.m_Cid = cid;
-            k1.m_Tag = 1;
-
-            Env::VarsEnum(&k0, sizeof(k0), &k1, sizeof(k1)); // enum all internal contract vars
-            EnumAndDump();
-        }
-    }
+    if (isDeposit)
+        Env::GenerateKernel(&cid, Vault::Deposit::s_iMethod, &arg, sizeof(arg), &fc, 1, nullptr, 0, 2000000U);
     else
-        Env::DocAddText("error", "invalid action");
+    {
+        MyAccountID myid;
+        myid.m_Cid = cid;
+
+        SigRequest sig;
+        sig.m_pID = &myid;
+        sig.m_nID = sizeof(myid);
+
+        Env::GenerateKernel(&cid, Vault::Withdraw::s_iMethod, &arg, sizeof(arg), &fc, 1, &sig, 1, 2000000U);
+    }
 }
+
+ON_METHOD(my_account, deposit)
+{
+    On_my_account_move(1, cid, amount, aid);
+}
+
+ON_METHOD(my_account, withdraw)
+{
+    On_my_account_move(0, cid, amount, aid);
+}
+
+ON_METHOD(my_account, view)
+{
+    PubKey pubKey;
+    DeriveMyPk(pubKey, cid);
+    DumpAccount(pubKey, cid);
+}
+
+#undef ON_METHOD
+#undef THE_FIELD
 
 export void Method_1()
 {
     char szRole[0x10], szAction[0x10];
     ContractID cid;
 
-    if (!Env::DocGetText("role", szRole, sizeof(szRole))) {
-        Env::DocAddText("error", "Role not specified");
-        return;
+    if (!Env::DocGetText("role", szRole, sizeof(szRole)))
+        return OnError("Role not specified");
+
+    if (!Env::DocGetText("action", szAction, sizeof(szAction)))
+        return OnError("Action not specified");
+
+#define PAR_READ(type, name) type arg_##name; Env::DocGet(#name, arg_##name);
+#define PAR_PASS(type, name) arg_##name,
+
+#define THE_METHOD(role, name) \
+        if (!Env::Strcmp(szAction, #name)) { \
+            Vault_##role##_##name(PAR_READ) \
+            On_##role##_##name(Vault_##role##_##name(PAR_PASS) 0); \
+            return; \
+        }
+
+#define THE_ROLE(name) \
+    if (!Env::Strcmp(szRole, #name)) { \
+        VaultRole_##name(THE_METHOD) \
+        return OnError("invalid Action"); \
     }
 
-    Env::DocGetText("action", szAction, sizeof(szAction));
-    bool bCid = Env::DocGetBlob("cid", &cid, sizeof(cid)) == sizeof(cid);
+    VaultRoles_All(THE_ROLE)
 
-    if (!Env::Strcmp(szRole, "manager")) {
-        On_Manager(szAction, bCid ? &cid : nullptr);
-        return;
-    }
+#undef THE_ROLE
+#undef THE_METHOD
+#undef PAR_PASS
+#undef PAR_READ
 
-    if (!bCid) {
-        Env::DocAddText("error", "cid missing");
-        return;
-    }
-
-    if (!Env::Strcmp(szRole, "my_account")) {
-        On_MyAccount(szAction, cid);
-        return;
-    }
-
-    if (!Env::Strcmp(szRole, "all_accounts")) {
-        On_AllAccounts(szAction, cid);
-        return;
-    }
-
-    Env::DocAddText("error", "unknown Role");
+    OnError("unknown Role");
 }
 

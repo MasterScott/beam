@@ -2403,7 +2403,7 @@ bool NodeProcessor::Recognizer::FindEvent(const TKey& key, TEvt& evt)
 		const Blob& body = wlk->get_Body();
 		proto::Event::Type::Enum eType;
 		der.reset(body.p, body.n);
-		der & eType;
+		eType = proto::Event::Type::Load(der);
 
 		if (TEvt::s_Type == eType)
 			break;
