@@ -1115,6 +1115,8 @@ namespace beam::wallet
                         auto event = Cast::Up<const proto::Event::Shielded&>(evt);
                         m_Wallet.ProcessEventShieldedUtxo(event, h);
                     }break;
+                default:
+                    break;
                 }
                 
             }
