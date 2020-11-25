@@ -327,9 +327,9 @@ NodeProcessor::Mmr::Mmr(NodeDB& db)
 }
 
 NodeProcessor::NodeProcessor()
-	:m_Mmr(m_DB)
-	,m_RecognizerHandler(*this)
+	:m_RecognizerHandler(*this)
 	,m_Recognizer(m_RecognizerHandler, m_Extra)
+	,m_Mmr(m_DB)
 {
 }
 
