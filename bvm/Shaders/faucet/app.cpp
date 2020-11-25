@@ -1,21 +1,13 @@
 #include "../common.h"
 #include "contract.h"
 
-struct DocGroup {
-    DocGroup(const char* sz) {
-        Env::DocAddGroup(sz);
-    }
-    ~DocGroup() {
-        Env::DocCloseGroup();
-    }
-};
-
 #define Faucet_manager_create(macro) \
     macro(Height, backlogPeriod) \
     macro(Amount, withdrawLimit)
 
 #define Faucet_manager_view(macro)
 #define Faucet_manager_view_params(macro) macro(ContractID, cid)
+#define Faucet_manager_view_funds(macro) macro(ContractID, cid)
 #define Faucet_manager_destroy(macro) macro(ContractID, cid)
 #define Faucet_manager_view_accounts(macro) macro(ContractID, cid)
 
@@ -28,6 +20,7 @@ struct DocGroup {
     macro(manager, destroy) \
     macro(manager, view) \
     macro(manager, view_params) \
+    macro(manager, view_funds) \
     macro(manager, view_accounts) \
     macro(manager, view_account)
 
@@ -56,11 +49,13 @@ struct DocGroup {
 export void Method_0()
 {
     // scheme
-    {   DocGroup gr("roles");
+    Env::DocGroup root("");
+
+    {   Env::DocGroup gr("roles");
 
 #define THE_FIELD(type, name) Env::DocAddText(#name, #type);
-#define THE_METHOD(role, name) { DocGroup grMethod(#name);  Faucet_##role##_##name(THE_FIELD) }
-#define THE_ROLE(name) { DocGroup grRole(#name); FaucetRole_##name(THE_METHOD) }
+#define THE_METHOD(role, name) { Env::DocGroup grMethod(#name);  Faucet_##role##_##name(THE_FIELD) }
+#define THE_ROLE(name) { Env::DocGroup grRole(#name); FaucetRole_##name(THE_METHOD) }
         
         FaucetRoles_All(THE_ROLE)
 #undef THE_ROLE
@@ -97,14 +92,40 @@ struct KeyGlobal
     uint8_t m_Val = 0;
 };
 
+struct KeyFunds
+{
+    KeyPrefix m_Prefix;
+    AssetID m_Aid_be; // big-endian format
+};
+
+struct ValueFunds
+{
+    Amount m_Hi_be;
+    Amount m_Lo_be;
+};
+
 #pragma pack (pop)
+
+template <typename T>
+T FromBE(T x)
+{
+    const uint8_t* p = (const uint8_t*) &x;
+
+    T res = *p;
+    for (uint32_t i = 1; i < sizeof(x); i++)
+        res = (res << 8) | p[i];
+
+    return res;
+}
 
 void EnumAndDump()
 {
+    Env::DocArray gr("accounts");
+
     while (true)
     {
         const KeyRaw* pRawKey;
-        const Amount* pVal;
+        const Faucet::AccountData* pVal;
 
         uint32_t nKey, nVal;
         if (!Env::VarsMoveNext((const void**) &pRawKey, &nKey, (const void**) &pVal, &nVal))
@@ -112,11 +133,12 @@ void EnumAndDump()
 
         if ((sizeof(*pRawKey) == nKey) && (sizeof(*pVal) == nVal))
         {
-            Env::DocAddGroup("elem");
-            Env::DocAddBlob("Account", &pRawKey->m_Key.m_Account, sizeof(pRawKey->m_Key.m_Account));
+            Env::DocGroup gr("");
+
+            Env::DocAddBlob_T("Account", pRawKey->m_Key.m_Account);
             Env::DocAddNum("AssetID", pRawKey->m_Key.m_Aid);
-            Env::DocAddNum("Amount", *pVal);
-            Env::DocCloseGroup();
+            Env::DocAddNum("Amount", pVal->m_Amount);
+            Env::DocAddNum("h0", pVal->m_h0);
         }
     }
 }
@@ -156,6 +178,8 @@ ON_METHOD(manager, view)
 
     Env::VarsEnum(&k0, sizeof(k0), &k1, sizeof(k1));
 
+    Env::DocArray gr("Cids");
+
     while (true)
     {
         const Key* pKey;
@@ -168,7 +192,7 @@ ON_METHOD(manager, view)
         if ((sizeof(Key) != nKey) || (1 != nVal))
             continue;
 
-        Env::DocAddBlob("Cid", &pKey->m_Cid, sizeof(pKey->m_Cid));
+        Env::DocAddBlob_T("", pKey->m_Cid);
     }
 }
 
@@ -204,9 +228,42 @@ ON_METHOD(manager, view_params)
     if (!Env::VarsMoveNext(&pK, &nKey, (const void**) &pVal, &nVal) || (sizeof(*pVal) != nVal))
         return OnError("failed to read");
 
-    DocGroup gr("res");
+    Env::DocGroup gr("params");
     Env::DocAddNum("backlogPeriod", pVal->m_BacklogPeriod);
     Env::DocAddNum("withdrawLimit", pVal->m_MaxWithdraw);
+}
+
+ON_METHOD(manager, view_funds)
+{
+    KeyFunds k0, k1;
+    k0.m_Prefix.m_Cid = cid;
+    k0.m_Prefix.m_Tag = 1;
+
+    Env::Memcpy(&k1, &k0, sizeof(k1));
+    k0.m_Aid_be = 0;
+    k1.m_Aid_be = (AssetID) -1;
+
+    Env::VarsEnum(&k0, sizeof(k0), &k1, sizeof(k1));
+
+    Env::DocArray("funds");
+
+    while (true)
+    {
+        const KeyFunds* pK;
+        const ValueFunds* pVal;
+
+        uint32_t nKey, nVal;
+        if (!Env::VarsMoveNext((const void**) &pK, &nKey, (const void**) &pVal, &nVal))
+            break;
+
+        if ((sizeof(*pK) == nKey) && (sizeof(*pVal) == nVal))
+        {
+            Env::DocGroup("");
+
+            Env::DocAddNum("Aid", FromBE(pK->m_Aid_be));
+            Env::DocAddNum("Amount", FromBE(pVal->m_Lo_be));
+        }
+    }
 }
 
 
@@ -287,8 +344,9 @@ ON_METHOD(my_account, view)
 
 export void Method_1() 
 {
+    Env::DocGroup root("");
+
     char szRole[0x10], szAction[0x10];
-    ContractID cid;
 
     if (!Env::DocGetText("role", szRole, sizeof(szRole)))
         return OnError("Role not specified");

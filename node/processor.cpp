@@ -172,11 +172,11 @@ void NodeProcessor::Initialize(const char* szPath, const StartParams& sp)
 	m_Horizon.Normalize();
 
 	uint64_t nFlags1 = m_DB.ParamIntGetDef(NodeDB::ParamID::Flags1);
-	if (NodeDB::Flags1::PendingMigrate21 & nFlags1)
+	if (NodeDB::Flags1::PendingMigrate24 & nFlags1)
 	{
-		Migrate21();
+		Migrate24();
 
-		m_DB.ParamIntSet(NodeDB::ParamID::Flags1, nFlags1 & ~NodeDB::Flags1::PendingMigrate21);
+		m_DB.ParamIntSet(NodeDB::ParamID::Flags1, nFlags1 & ~NodeDB::Flags1::PendingMigrate24);
 		CommitDB();
 	}
 
@@ -3024,9 +3024,11 @@ bool NodeProcessor::HandleAssetCreate(const PeerID& pidOwner, const Asset::Metad
 		ai.m_LockHeight = bic.m_Height;
 
 		ai.m_Metadata.m_Hash = md.m_Hash;
-		TemporarySwap<ByteBuffer> ts(Cast::NotConst(md).m_Value, ai.m_Metadata.m_Value);
 
-		InternalAssetAdd(ai, !bic.m_SkipDefinition);
+		{
+			TemporarySwap<ByteBuffer> ts(Cast::NotConst(md).m_Value, ai.m_Metadata.m_Value);
+			InternalAssetAdd(ai, !bic.m_SkipDefinition);
+		}
 
 		BlockInterpretCtx::Ser ser(bic);
 		ser & ai.m_ID;
@@ -3038,9 +3040,15 @@ bool NodeProcessor::HandleAssetCreate(const PeerID& pidOwner, const Asset::Metad
 			evt.m_Height = bic.m_Height;
 			evt.m_Index = bic.m_nKrnIdx;
 
-			uint8_t dummy = 0;
-			evt.m_Body.p = &dummy;
-			evt.m_Body.n = sizeof(dummy);
+			ByteBuffer bufBlob;
+			bufBlob.resize(sizeof(AssetCreateInfoPacked) + md.m_Value.size());
+			auto* pAcip = reinterpret_cast<AssetCreateInfoPacked*>(&bufBlob.front());
+
+			memcpy(&pAcip->m_Owner, &pidOwner, sizeof(pidOwner));
+			if (!md.m_Value.empty())
+				memcpy(pAcip + 1, &md.m_Value.front(), md.m_Value.size());
+
+			evt.m_Body = bufBlob;
 
 			m_DB.AssetEvtsInsert(evt);
 		}
@@ -3985,12 +3993,12 @@ bool NodeProcessor::BlockInterpretCtx::BvmProcessor::SaveVar(const Blob& key, co
 
 Height NodeProcessor::BlockInterpretCtx::BvmProcessor::get_Height()
 {
-	return m_Proc.m_Cursor.m_Full.m_Height;
+	return m_Bic.m_Height - 1;
 }
 
 bool NodeProcessor::BlockInterpretCtx::BvmProcessor::get_HdrAt(Block::SystemState::Full& s)
 {
-	if (s.m_Height > m_Proc.m_Cursor.m_Full.m_Height)
+	if (s.m_Height > m_Bic.m_Height - 1)
 		return false;
 
 	if (s.m_Height == m_Proc.m_Cursor.m_Full.m_Height)
@@ -5559,7 +5567,7 @@ void NodeProcessor::RecentStates::Push(uint64_t rowID, const Block::SystemState:
 	e.m_State = s;
 }
 
-void NodeProcessor::Migrate21()
+void NodeProcessor::Migrate24()
 {
 	LOG_INFO() << "Migrating asset tables...";
 
@@ -5567,6 +5575,8 @@ void NodeProcessor::Migrate21()
 
 	while (m_Mmr.m_Assets.m_Count)
 		InternalAssetDel(static_cast<Asset::ID>(m_Mmr.m_Assets.m_Count), true);
+
+	m_DB.ContractDataDelAll();
 
 	struct KrnWalkerAssetsMigrate
 		:public IKrnWalker
@@ -5583,6 +5593,8 @@ void NodeProcessor::Migrate21()
 			case TxKernel::Subtype::AssetCreate:
 			case TxKernel::Subtype::AssetEmit:
 			case TxKernel::Subtype::AssetDestroy:
+			case TxKernel::Subtype::ContractCreate:
+			case TxKernel::Subtype::ContractInvoke:
 				break;
 			default:
 				return true;
@@ -5600,6 +5612,7 @@ void NodeProcessor::Migrate21()
 
 			bic.m_Rollback.swap(m_Rollback);
 			m_Rollback.clear();
+			m_nKrnIdx = bic.m_nKrnIdx;
 
 			return true;
 		}
@@ -5616,42 +5629,29 @@ int NodeProcessor::get_AssetAt(Asset::Full& ai, Height h)
 	assert(h <= m_Cursor.m_ID.m_Height);
 
 	NodeDB::WalkerAssetEvt wlk;
-	m_DB.AssetEvtsEnumBwd(wlk, ai.m_ID + Asset::s_MaxCount, h);
+	m_DB.AssetEvtsEnumBwd(wlk, ai.m_ID + Asset::s_MaxCount, h); // search for create/destroy
 	if (!wlk.MoveNext())
 		return 0;
 
-	if (!wlk.m_Body.n)
+	if (!wlk.m_Body.n) // last was destroy
 		return -1;
 
-	struct MyLocator1
-		:public IKrnWalker
-	{
-		Asset::Full* m_pDst;
-		uint32_t m_Target;
+	if (wlk.m_Body.n < sizeof(AssetCreateInfoPacked))
+		OnCorrupted();
 
-		virtual bool OnKrn(const TxKernel& krn_) override
-		{
-			if (m_Target == m_nKrnIdx)
-			{
-				if (TxKernel::Subtype::AssetCreate != krn_.get_Subtype())
-					OnCorrupted();
-				const TxKernelAssetCreate& krn = Cast::Up<TxKernelAssetCreate>(krn_);
+	auto* pAcip = reinterpret_cast<const AssetCreateInfoPacked*>(wlk.m_Body.p);
+	memcpy(&ai.m_Owner, &pAcip->m_Owner, sizeof(ai.m_Owner));
 
-				m_pDst->m_Owner = krn.m_Owner;
-				m_pDst->m_Metadata.m_Value.swap(Cast::NotConst(krn.m_MetaData.m_Value));
-				m_pDst->m_Metadata.m_Hash = krn.m_MetaData.m_Hash;
-			}
-			return true;
-		}
+	ai.m_Metadata.m_Value.resize(wlk.m_Body.n - sizeof(AssetCreateInfoPacked));
+	if (!ai.m_Metadata.m_Value.empty())
+		memcpy(&ai.m_Metadata.m_Value.front(), pAcip + 1, ai.m_Metadata.m_Value.size());
+	ai.m_Metadata.UpdateHash();
 
-	} loc;
-	loc.m_pDst = &ai;
-	loc.m_Target = wlk.m_Index;
-
-	EnumKernels(loc, wlk.m_Height);
+	typedef std::pair<Height, uint32_t> HeightAndIndex;
+	HeightAndIndex hiCreate(wlk.m_Height, wlk.m_Index);
 
 	m_DB.AssetEvtsEnumBwd(wlk, ai.m_ID, h);
-	if (wlk.MoveNext())
+	if (wlk.MoveNext() && (HeightAndIndex(wlk.m_Height, wlk.m_Index) > hiCreate))
 	{
 		AssetDataPacked adp;
 		adp.set_Strict(wlk.m_Body);

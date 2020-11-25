@@ -906,6 +906,7 @@ namespace beam::wallet
         case TxType::AssetConsume: return "asset consume";
         case TxType::AtomicSwap: return "atomic swap";
         case TxType::AssetInfo: return "asset info";
+        case TxType::Contract: return "contract";
         default:
             BOOST_ASSERT_MSG(false, kErrorUnknownTxType);
             return "unknown";
@@ -963,6 +964,16 @@ namespace beam::wallet
     std::string TxDescription::getReceiverIdentity() const
     {
         return getIdentity(!m_sender);
+    }
+
+    std::string TxDescription::getSender() const
+    {
+        return std::to_string(m_sender ? m_myId : m_peerId);
+    }
+
+    std::string TxDescription::getReceiver() const
+    {
+        return std::to_string(!m_sender ? m_myId : m_peerId);
     }
 
     std::string TxDescription::getIdentity(bool isSender) const

@@ -2,7 +2,7 @@
 
 namespace Roulette
 {
-    static const ShaderID s_SID = { 0x8b,0x9c,0x0b,0xc3,0x71,0x09,0x1f,0xbc,0xa1,0x5b,0xf6,0x33,0x20,0xab,0xbf,0xa9,0x53,0x03,0xcc,0xcd,0x73,0xb4,0x2c,0x54,0x6f,0x3e,0xa4,0x7e,0x20,0x97,0x8d,0x5b };
+    static const ShaderID s_SID = { 0x30,0xa2,0x39,0x18,0x05,0xcf,0xe9,0xe1,0x39,0x9a,0x18,0xb7,0xd9,0x3d,0xb1,0xcd,0xcf,0xfb,0x39,0xaa,0x7c,0xa1,0x0e,0x82,0x48,0x96,0xcf,0x05,0x5c,0xe1,0x01,0xed };
 
 #pragma pack (push, 1)
 
@@ -16,19 +16,28 @@ namespace Roulette
         }
     };
 
-    struct Restart {
+    struct Spin {
         static const uint32_t s_iMethod = 2;
-        Height m_dhRound;
+        uint32_t m_PlayingSectors = 0; // for tests, can lower num of sectors
 
         template <bool bToShader>
         void Convert()
         {
-            ConvertOrd<bToShader>(m_dhRound);
+            ConvertOrd<bToShader>(m_PlayingSectors);
         }
     };
 
-    struct PlaceBid {
+    struct BetsOff {
         static const uint32_t s_iMethod = 3;
+
+        template <bool bToShader>
+        void Convert()
+        {
+        }
+    };
+
+    struct Bid {
+        static const uint32_t s_iMethod = 4;
         PubKey m_Player;
         uint32_t m_iSector;
 
@@ -40,7 +49,7 @@ namespace Roulette
     };
 
     struct Take {
-        static const uint32_t s_iMethod = 4;
+        static const uint32_t s_iMethod = 5;
         PubKey m_Player;
 
         template <bool bToShader>
@@ -51,20 +60,21 @@ namespace Roulette
 
     struct State
     {
-        static const uint32_t s_Sectors = 36;
-        static const Amount s_Prize = 100000000U; // 1 jetton
+        static const uint32_t s_Sectors = 37;
+        static const Amount s_PrizeParity = 100000000U; // 1 jetton
+        static const Amount s_PrizeSector = s_PrizeParity * 25;
 
         AssetID m_Aid;
-        Height m_hRoundEnd;
-        uint32_t m_iWinSector;
-        uint32_t m_pBidders[s_Sectors];
+        uint32_t m_iRound;
+        uint32_t m_PlayingSectors;
+        uint32_t m_iWinner;
         PubKey m_Dealer;
     };
 
     struct BidInfo
     {
         uint32_t m_iSector;
-        Height m_hRoundEnd;
+        uint32_t m_iRound;
     };
 
 #pragma pack (pop)

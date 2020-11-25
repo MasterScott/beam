@@ -938,7 +938,7 @@ namespace
         return 0;
     }
 
-    void ShowAssetCoins(const IWalletDB::Ptr& walletDB, Asset::ID assetId)
+    void ShowAssetCoins(const IWalletDB::Ptr& walletDB, Asset::ID assetId, boost::optional<TxID> txID = {})
     {
         const auto [unitName, nthName] = GetAssetNames(walletDB, assetId);
         const uint8_t idWidth = assetId == Asset::s_InvalidID ? 49 : 57;
@@ -948,7 +948,29 @@ namespace
         std::vector<boost::any> reliable;
         std::vector<boost::any> unreliable;
 
+        auto isSkipedByTxID = [&](const auto& txID, const auto& createID, const auto& spentID)
+        {
+            if (!txID)
+            {
+                return false;
+            }
+            if (createID && *createID == *txID)
+            {
+                return false;
+            }
+            if (spentID && *spentID == *txID)
+            {
+                return false;
+            }
+            return true;
+        };
+
         walletDB->visitCoins([&](const Coin& c)->bool {
+            if (isSkipedByTxID(txID, c.m_createTxId, c.m_spentTxId))
+            {
+                // skip
+                return true;
+            }
             if (c.m_ID.m_AssetID == assetId)
             {
                 if (c.m_confirmHeight < lockHeight)
@@ -964,6 +986,11 @@ namespace
         });
 
         walletDB->visitShieldedCoins([&](const ShieldedCoin& c)->bool {
+            if (isSkipedByTxID(txID, c.m_createTxId, c.m_spentTxId))
+            {
+                // skip
+                return true;
+            }
             if (c.m_CoinID.m_AssetID == assetId)
             {
                 if (c.m_confirmHeight < lockHeight)
@@ -1322,18 +1349,22 @@ namespace
              % boost::io::group(left, setfill('.'), setw(kWidth), kWalletSummaryFieldTotalFee) % to_string(PrintableAmount(totals.Fee))
              % boost::io::group(left, setfill('.'), setw(kWidth), kWalletSummaryFieldTotalUnspent) % to_string(PrintableAmount(unspent));
 
-        ShowAssetCoins(walletDB, Zero);
-
-        if (vm.count(cli::TX_HISTORY) /*|| vm.count(cli::SHIELDED_TX_HISTORY)*/)
+        if (vm.count(cli::UTXO_LIST))
+        {
+            ShowAssetCoins(walletDB, Zero);
+        }
+        else if (vm.count(cli::TX_HISTORY) /*|| vm.count(cli::SHIELDED_TX_HISTORY)*/)
         {
             std::vector<TxDescription> txHistory;
 
             if (vm.count(cli::TX_HISTORY))
             {
-                auto txSimple  = walletDB->getTxHistory();
-                auto txMaxPriv = walletDB->getTxHistory(TxType::PushTransaction);
-                txHistory.insert(txHistory.end(), txSimple.begin(), txSimple.end());
-                txHistory.insert(txHistory.end(), txMaxPriv.begin(), txMaxPriv.end());
+                std::array<TxType, 3> types = { TxType::Simple, TxType::PushTransaction, TxType::Contract };
+                for (auto type : types)
+                {
+                    auto v = walletDB->getTxHistory(type);
+                    txHistory.insert(txHistory.end(), v.begin(), v.end());
+                }
             }
 
             txHistory.erase(std::remove_if(txHistory.begin(), txHistory.end(), [](const auto& tx) {
@@ -1381,6 +1412,10 @@ namespace
                         << std::endl;
                 }
             }
+        }
+        else
+        {
+            std::cout << "If you wish to see the list of UXTOs or transaction history use\n\t--" << cli::UTXO_LIST << "  or  --" << cli::TX_HISTORY << "  parameters correspondingly" << std::endl;
         }
 
         #ifdef BEAM_ATOMIC_SWAP_SUPPORT
@@ -1504,10 +1539,17 @@ namespace
         const auto statusInterpreter = walletDB->getStatusInterpreter(*tx);
         const auto txstatus = statusInterpreter->getStatus();
 
-        LOG_INFO()
+        cout
+            << "\n"
             << boost::format(kTxDetailsFormat) % txdetails % txstatus
             << (tx->m_status == TxStatus::Failed ? boost::format(kTxDetailsFailReason) % GetFailureMessage(tx->m_failureReason) : boost::format(""))
-            << (!token.empty() ? "\nAddress: " : "") << token;
+            << (!token.empty() ? "\nAddress:           " : "") << token;
+
+        if (vm.count(cli::UTXO_LIST))
+        {
+            cout << "\n\n";
+            ShowAssetCoins(walletDB, Zero, txId);
+        }
 
         return 0;
     }
@@ -2185,7 +2227,7 @@ namespace
                 man.m_pNetwork = wallet->GetNodeEndpoint();
                 man.m_pHist = &walletDB->get_History();
 
-                auto sVal = vm[cli::SHADER_BYTECODE_MANAGER].as<string>();
+                auto sVal = vm[cli::SHADER_BYTECODE_APP].as<string>();
                 if (sVal.empty())
                     throw std::runtime_error("shader file not specified");
 
@@ -2221,20 +2263,12 @@ namespace
 
                 std::cout << "Creating new contract invocation tx on behalf of the shader" << std::endl;
 
-                auto txId = wallet->StartTransaction(
+                currentTxID = wallet->StartTransaction(
                     CreateTransactionParameters(TxType::Contract)
-                    .SetParameter(TxParameterID::ContractDataPacked, man.m_vInvokeData)
-                    .SetParameter(TxParameterID::Fee, Amount(25)));
-                txId;
+                    .SetParameter(TxParameterID::ContractDataPacked, man.m_vInvokeData));
                 return 0;
             });
     }
-
-
-
-
-
-
 
     int Listen(const po::variables_map& vm)
     {

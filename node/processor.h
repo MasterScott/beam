@@ -51,7 +51,7 @@ class NodeProcessor
 	Height RaiseTxoLo(Height);
 	Height RaiseTxoHi(Height);
 	void Vacuum();
-	void Migrate21();
+	void Migrate24();
 	void InitializeUtxos();
 	bool TestDefinition();
 	void TestDefinitionStrict();
@@ -516,6 +516,11 @@ public:
 		uintBigFor<Height>::Type m_LockHeight;
 
 		void set_Strict(const Blob&);
+	};
+
+	struct AssetCreateInfoPacked {
+		PeerID m_Owner;
+		// followed by metadata
 	};
 
 #pragma pack (pop)

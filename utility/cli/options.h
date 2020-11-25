@@ -99,6 +99,7 @@ namespace beam
         extern const char* NEW_ADDRESS_COMMENT;
         extern const char* EXPIRATION_TIME;
         extern const char* TX_HISTORY;
+        extern const char* UTXO_LIST;
         extern const char* TX_ID;
         extern const char* SEED_PHRASE;
         extern const char* IGNORE_DICTIONARY;
@@ -107,6 +108,8 @@ namespace beam
         extern const char* FEE_FULL;
         extern const char* LOG_LEVEL;
         extern const char* FILE_LOG_LEVEL;
+        extern const char* LOG_ERROR;
+        extern const char* LOG_WARNING;
         extern const char* LOG_INFO;
         extern const char* LOG_DEBUG;
         extern const char* LOG_VERBOSE;
@@ -224,7 +227,7 @@ namespace beam
         // shaders
         extern const char* SHADER_INVOKE;
         extern const char* SHADER_ARGS;
-        extern const char* SHADER_BYTECODE_MANAGER;
+        extern const char* SHADER_BYTECODE_APP;
         extern const char* SHADER_BYTECODE_CONTRACT;
     }
 

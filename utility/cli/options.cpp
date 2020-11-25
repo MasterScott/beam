@@ -193,6 +193,7 @@ namespace beam
         const char* SEND = "send";
         const char* INFO = "info";
         const char* TX_HISTORY = "tx_history";
+        const char* UTXO_LIST = "utxo_list";
         const char* CANCEL_TX = "cancel_tx";
         const char* DELETE_TX = "delete_tx";
         const char* TX_DETAILS = "tx_details";
@@ -207,6 +208,8 @@ namespace beam
         const char* FEE_FULL = "fee,f";
         const char* LOG_LEVEL = "log_level";
         const char* FILE_LOG_LEVEL = "file_log_level";
+        const char* LOG_ERROR = "error";
+        const char* LOG_WARNING = "warning";
         const char* LOG_INFO = "info";
         const char* LOG_DEBUG = "debug";
         const char* LOG_VERBOSE = "verbose";
@@ -323,7 +326,7 @@ namespace beam
         // shaders
         const char* SHADER_INVOKE       = "shader";
         const char* SHADER_ARGS         = "shader_args";
-        const char* SHADER_BYTECODE_MANAGER  = "shader_manager_file";
+        const char* SHADER_BYTECODE_APP      = "shader_app_file";
         const char* SHADER_BYTECODE_CONTRACT = "shader_contract_file";
     }
 
@@ -359,8 +362,8 @@ namespace beam
         general_options.add_options()
             (cli::HELP_FULL, "list all available options and commands")
             (cli::VERSION_FULL, "print project version")
-            (cli::LOG_LEVEL, po::value<string>(), "set log level [info|debug|verbose]")
-            (cli::FILE_LOG_LEVEL, po::value<string>(), "set file log level [info|debug|verbose]")
+            (cli::LOG_LEVEL, po::value<string>(), "set log level [error|warning|info(default)|debug|verbose]")
+            (cli::FILE_LOG_LEVEL, po::value<string>(), "set file log level [error|warning|info(default)|debug|verbose]")
             (cli::LOG_CLEANUP_DAYS, po::value<uint32_t>()->default_value(5), "old logfiles cleanup period(days)")
             (cli::GIT_COMMIT_HASH, "print git commit hash value");
 
@@ -415,6 +418,7 @@ namespace beam
             (cli::WALLET_STORAGE, po::value<string>()->default_value("wallet.db"), "path to the wallet database file")
             (cli::CONFIRMATIONS_COUNT, po::value<Nonnegative<uint32_t>>()->default_value(Nonnegative<uint32_t>(0)), "count of confirmations before you can't spend coin")
             (cli::TX_HISTORY, "print transaction history (should be used with info command)")
+            (cli::UTXO_LIST, "print the list of UTXOs (should be used with info command)")
             (cli::LISTEN, "start listen after new_addr command")
             (cli::TX_ID, po::value<string>()->default_value(""), "transaction id")
             (cli::NEW_ADDRESS_COMMENT, po::value<string>()->default_value(""), "comment for the newly created token or address")
@@ -430,7 +434,7 @@ namespace beam
             (cli::PROXY_USE, po::value<bool>()->default_value(false), "use socks5 proxy server for node connection")
             (cli::PROXY_ADDRESS, po::value<string>()->default_value("127.0.0.1:9150"), "proxy server address")
             (cli::SHADER_ARGS, po::value<string>()->default_value(""), "Arguments to pass to the shader")
-            (cli::SHADER_BYTECODE_MANAGER, po::value<string>()->default_value(""), "Path to the shader file")
+            (cli::SHADER_BYTECODE_APP, po::value<string>()->default_value(""), "Path to the app shader file")
             (cli::SHADER_BYTECODE_CONTRACT, po::value<string>()->default_value(""), "Path to the shader file for the contract (if the contract is being-created)")
             (cli::MAX_PRIVACY_ADDRESS, po::bool_switch()->default_value(false), "generate max privacy transaction address")
             (cli::OFFLINE_ADDRESS, po::value<Positive<uint32_t>>(), "generate offline transaction address with given number of payments")
@@ -664,6 +668,8 @@ namespace beam
     {
         const map<std::string, int> logLevels
         {
+            { cli::LOG_ERROR, LOG_LEVEL_ERROR },
+            { cli::LOG_WARNING, LOG_LEVEL_WARNING },
             { cli::LOG_DEBUG, LOG_LEVEL_DEBUG },
             { cli::INFO, LOG_LEVEL_INFO },
             { cli::LOG_VERBOSE, LOG_LEVEL_VERBOSE }
