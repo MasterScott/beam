@@ -650,6 +650,7 @@ namespace beam::wallet
                     return false;
                 }
                 params.SetParameter(TxParameterID::Voucher, *voucher);
+                params.SetParameter(TxParameterID::MaxPrivacyMinAnonimitySet, uint8_t(64));
             }
             break;
         default:
@@ -841,11 +842,10 @@ namespace beam::wallet
         switch (m_status)
         {
         case TxStatus::InProgress:
-            return m_selfTx ? "sending to own address" : (m_sender ? "waiting for receiver" : "waiting for sender");
         case TxStatus::Registering:
-            return m_selfTx ? "sending to own address" : "in progress";
+            return "in progress";
         case TxStatus::Completed:
-            return m_selfTx ? "sent to own address" : (m_sender ? "sent" : "received");
+            return "completed";
         default:
             break;
         }
