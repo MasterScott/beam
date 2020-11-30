@@ -1122,6 +1122,11 @@ private:
         }
 
 
+        void OnMsg(proto::GetBodyPack&& msg) override
+        {
+            Send(proto::Body{});
+        }
+
 
         void OnDisconnect(const DisconnectReason& r) override
         {
