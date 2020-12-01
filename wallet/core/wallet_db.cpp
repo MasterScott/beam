@@ -1359,6 +1359,26 @@ namespace beam::wallet
             MigrateAddressesFrom24(walletDB, db, LASER_ADDRESSES_NAME);
         }
 
+        void MigrateTransactionsFrom25(WalletDB* walletDB)
+        {
+            sqlite::Statement stm((const WalletDB*)walletDB, "SELECT txID, value FROM " TX_PARAMS_NAME " WHERE subTxID=?1 AND paramID=?2;");
+            stm.bind(1, kDefaultSubTxID);
+            stm.bind(2, TxParameterID::OriginalToken);
+            while (stm.step())
+            {
+                TxID txID;
+                std::string originalAddress;
+                ByteBuffer buf;
+                stm.get(0, txID);
+                stm.get(1, buf);
+                if (fromByteBuffer(buf, originalAddress))
+                {
+                    auto addressType = GetAddressType(originalAddress);
+                    storage::setTxParameter(*walletDB, txID, TxParameterID::AddressType, addressType, false);
+                }
+            }
+        }
+
         void OpenAndMigrateIfNeeded(const string& path, sqlite3** db, const SecString& password)
         {
             int ret = sqlite3_open_v2(path.c_str(), db, SQLITE_OPEN_READWRITE, nullptr);
@@ -1943,6 +1963,7 @@ namespace beam::wallet
 
                 case DbVersion22:
                     CreateShieldedCoinsTableIndex(db);
+                    // no break
 
                 case DbVersion23:
                     LOG_INFO() << "Converting DB from format 23...";
@@ -1950,14 +1971,21 @@ namespace beam::wallet
                     {
                         AddVouchersFlagsColumn(db);
                     }
+                    // no break
 
                 case DbVersion24:
                     LOG_INFO() << "Converting DB from format 24...";
                     MigrateAddressesFrom24(walletDB.get(), walletDB->_db);
+                    // no break
 
                 case DbVersion25:
                     LOG_INFO() << "Converting DB from format 25...";
                     CreateExchangeRatesHistoryTable(walletDB->_db);
+                    // no break
+
+                case DbVersion26:
+                    LOG_INFO() << "Converting DB from format 26...";
+                    MigrateTransactionsFrom25(walletDB.get());
 
                 case DbVersion26:
                     LOG_INFO() << "Converting DB from format 26...";
