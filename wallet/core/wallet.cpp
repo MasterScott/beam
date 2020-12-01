@@ -28,6 +28,7 @@
 #include <random>
 #include <iomanip>
 #include <numeric>
+#include <queue>
 #include "node/processor.h"
 
 namespace beam::wallet
@@ -1118,7 +1119,60 @@ namespace beam::wallet
                 default:
                     break;
                 }
-                
+            }
+
+            void AssetEvtsGetStrict(NodeDB::AssetEvt& event, Height h, uint32_t nKrnIdx) override 
+            {
+            }
+
+            void InsertEvent(Height h, const Blob& b, const Blob& k) override 
+            {
+                m_Wallet.m_WalletDB->insertEvent(h, b, k);
+            }
+
+            struct WalletDBWalkerEvent : NodeProcessor::Recognizer::WalkerEventBase
+            {
+                IWalletDB::Ptr m_WalletDB;
+                struct Event
+                {
+                    Height m_Height;
+                    ByteBuffer m_Body;
+                };
+                std::queue<Event> m_Events;
+                Event m_CurrentEvent;
+                Blob m_Body;
+                WalletDBWalkerEvent(IWalletDB::Ptr walletDB)
+                    : m_WalletDB(walletDB)
+                {
+                }
+                void Find(const Blob& key)
+                {
+                    m_WalletDB->visitEvents(0, key, [this](Height h, ByteBuffer&& b)
+                    {
+                        m_Events.push({ h, std::move(b) });
+                        return true;
+                    });
+                }
+                bool MoveNext() override 
+                {
+                    if (m_Events.empty())
+                        return false;
+                    m_CurrentEvent = std::move(m_Events.front());
+                    m_Body = Blob(m_CurrentEvent.m_Body);
+                    m_Events.pop();
+                    return true;
+                }
+                const Blob& get_Body() const override 
+                {
+                    return m_Body;
+                }
+            };
+
+            std::unique_ptr<NodeProcessor::Recognizer::WalkerEventBase> FindEvents(const Blob& key) override
+            {
+                auto w = std::make_unique<WalletDBWalkerEvent>(m_Wallet.m_WalletDB);
+                w->Find(key);
+                return w;
             }
         };
         RecognizerHandler h(*this, m_WalletDB->get_MasterKdf());
@@ -1339,6 +1393,7 @@ namespace beam::wallet
         m_WalletDB->rollbackConfirmedUtxo(sTip.m_Height);
         m_WalletDB->rollbackConfirmedShieldedUtxo(sTip.m_Height);
         m_WalletDB->rollbackAssets(sTip.m_Height);
+        m_WalletDB->deleteEventsFrom(sTip.m_Height + 1);
 
         // Rollback active transaction
         for (auto it = m_ActiveTransactions.begin(); m_ActiveTransactions.end() != it; it++)

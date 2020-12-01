@@ -1352,7 +1352,7 @@ void TestReextract()
 
 int main()
 {
-    int logLevel = LOG_LEVEL_DEBUG;
+    int logLevel = LOG_LEVEL_WARNING;
     auto logger = beam::Logger::create(logLevel, logLevel);
     Rules::get().FakePoW = true;
     Rules::get().UpdateChecksum();
@@ -1364,9 +1364,9 @@ int main()
 
     //TestUnlinkTx();
     //TestCancelUnlinkTx();
-//    TestSimpleTx();
-//    TestMaxPrivacyTx();
-//    TestPublicAddressTx();
+    TestSimpleTx();
+    TestMaxPrivacyTx();
+    TestPublicAddressTx();
     TestDirectAnonymousPayment();
     TestManyTransactons(20, Lelantus::Cfg{2, 5}, Lelantus::Cfg{2, 3});
     TestManyTransactons(40, Lelantus::Cfg{ 2, 5 }, Lelantus::Cfg{ 2, 3 });
