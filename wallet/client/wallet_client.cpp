@@ -285,6 +285,11 @@ struct WalletModelBridge : public Bridge<IWalletModelAsync>
     {
         call_async(&IWalletModelAsync::generateVouchers, ownID, count, std::move(callback));
     }
+
+    void getShieldedCountAt(Height h, AsyncCallback<Height, TxoID>&& callback) override
+    {
+        call_async(&IWalletModelAsync::getShieldedCountAt, h, std::move(callback));
+    }
 };
 }
 
@@ -819,7 +824,7 @@ namespace beam::wallet
     void WalletClient::getUtxosStatus()
     {
         onAllUtxoChanged(ChangeAction::Reset, getUtxos());
-        onShieldedCoinChanged(ChangeAction::Reset, m_walletDB->getShieldedCoins(0));
+        onShieldedCoinChanged(ChangeAction::Reset, m_walletDB->getShieldedCoins(beam::Asset::s_BeamID));
     }
 
     void WalletClient::getAddresses(bool own)
@@ -1286,6 +1291,21 @@ namespace beam::wallet
         {
             cb(std::move(res));
         });
+    }
+
+    void WalletClient::getShieldedCountAt(Height h, AsyncCallback<Height, TxoID>&& callback)
+    {
+        if (auto w = m_wallet.lock(); w)
+        {
+            auto onRequestComplete = [this, cb = std::move(callback)](Height h, TxoID count)
+            {
+                postFunctionToClientContext([h, count, clientContextCallback = std::move(cb)]()
+                {
+                    clientContextCallback(h, count);
+                });
+            };
+            w->RequestShieldedOutputsAt(h, onRequestComplete);
+        }
     }
 
     bool WalletClient::OnProgress(uint64_t done, uint64_t total)

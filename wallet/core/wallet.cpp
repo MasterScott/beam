@@ -442,6 +442,11 @@ namespace beam::wallet
         return false;
     }
 
+    bool Wallet::MyRequestShieldedOutputsAt::operator < (const MyRequestShieldedOutputsAt& x) const
+    {
+        return false;
+    }
+
     bool Wallet::MyRequestBodyPack::operator < (const MyRequestBodyPack& x) const
     {
         return false;
@@ -1067,6 +1072,11 @@ namespace beam::wallet
     {
         // TODO: save full response?
         m_WalletDB->set_ShieldedOuts(r.m_Res.m_ShieldedOuts);
+    }
+
+    void Wallet::OnRequestComplete(MyRequestShieldedOutputsAt& r)
+    {
+        r.m_callback(r.m_Msg.m_Height, r.m_Res.m_ShieldedOuts);
     }
 
     void Wallet::OnRequestComplete(MyRequestBodyPack& r)
@@ -1815,6 +1825,14 @@ namespace beam::wallet
     {
         MyRequestStateSummary::Ptr pReq(new MyRequestStateSummary);
         PostReqUnique(*pReq);
+    }
+
+    void Wallet::RequestShieldedOutputsAt(Height h, std::function<void(Height, TxoID)>&& onRequestComplete)
+    {
+        MyRequestShieldedOutputsAt::Ptr pVal(new MyRequestShieldedOutputsAt);
+        pVal->m_Msg.m_Height = h;
+        pVal->m_callback = std::move(onRequestComplete);
+        PostReqUnique(*pVal);
     }
 
     void Wallet::RestoreTransactionFromShieldedCoin(ShieldedCoin& coin)

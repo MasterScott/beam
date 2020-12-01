@@ -35,18 +35,19 @@ namespace proto {
 	struct FlyClient
 	{
 #define REQUEST_TYPES_All(macro) \
-		macro(Utxo,              GetProofUtxo,         ProofUtxo) \
-		macro(Kernel,            GetProofKernel,       ProofKernel) \
-		macro(Kernel2,           GetProofKernel2,      ProofKernel2) \
-		macro(Events,            GetEvents,            Events) \
-		macro(Transaction,       NewTransaction,       Status) \
-		macro(ShieldedList,      GetShieldedList,      ShieldedList) \
-		macro(ProofShieldedInp,  GetProofShieldedInp,  ProofShieldedInp) \
-		macro(ProofShieldedOutp, GetProofShieldedOutp, ProofShieldedOutp) \
-		macro(BbsMsg,            BbsMsg,               Pong) \
-		macro(Asset,             GetProofAsset,        ProofAsset) \
-		macro(StateSummary,      GetStateSummary,      StateSummary) \
-		macro(BodyPack,          GetBodyPack,          Body)
+		macro(Utxo,              GetProofUtxo,          ProofUtxo) \
+		macro(Kernel,            GetProofKernel,        ProofKernel) \
+		macro(Kernel2,           GetProofKernel2,       ProofKernel2) \
+		macro(Events,            GetEvents,             Events) \
+		macro(Transaction,       NewTransaction,        Status) \
+		macro(ShieldedList,      GetShieldedList,       ShieldedList) \
+		macro(ProofShieldedInp,  GetProofShieldedInp,   ProofShieldedInp) \
+		macro(ProofShieldedOutp, GetProofShieldedOutp,  ProofShieldedOutp) \
+		macro(BbsMsg,            BbsMsg,                Pong) \
+		macro(Asset,             GetProofAsset,         ProofAsset) \
+		macro(StateSummary,      GetStateSummary,       StateSummary) \
+		macro(ShieldedOutputsAt, GetShieldedOutputsAt,  ShieldedOutputsAt) \
+		macro(BodyPack,          GetBodyPack,           Body)
 
 		class Request
 		{
