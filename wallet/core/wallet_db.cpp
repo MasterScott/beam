@@ -918,7 +918,8 @@ namespace beam::wallet
         const char* LastUpdateTimeName = "LastUpdateTime";
         const char* kStateSummaryShieldedOutsDBPath = "StateSummaryShieldedOuts";
         const int BusyTimeoutMs = 5000;
-        const int DbVersion   = 27;
+        const int DbVersion   = 28;
+        const int DbVersion27 = 27;
         const int DbVersion26 = 26;
         const int DbVersion25 = 25;
         const int DbVersion24 = 24;
@@ -1986,9 +1987,10 @@ namespace beam::wallet
                 case DbVersion26:
                     LOG_INFO() << "Converting DB from format 26...";
                     MigrateTransactionsFrom25(walletDB.get());
+                    // no break
 
-                case DbVersion26:
-                    LOG_INFO() << "Converting DB from format 26...";
+                case DbVersion27:
+                    LOG_INFO() << "Converting DB from format 27...";
                     CreateEventsTable(walletDB->_db);
 
                     storage::setVar(*walletDB, Version, DbVersion);
