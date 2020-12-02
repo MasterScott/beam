@@ -917,6 +917,8 @@ namespace beam::wallet
         const char* SystemStateIDName = "SystemStateID";
         const char* LastUpdateTimeName = "LastUpdateTime";
         const char* kStateSummaryShieldedOutsDBPath = "StateSummaryShieldedOuts";
+        const char* kMaxPrivacyLockTimeLimitHours = "MaxPrivacyLockTimeLimitHours";
+        const uint8_t kDefaultMaxPrivacyLockTimeLimitHours = 72;
         const int BusyTimeoutMs = 5000;
         const int DbVersion   = 28;
         const int DbVersion27 = 27;
@@ -2465,6 +2467,18 @@ namespace beam::wallet
     void IWalletDB::set_ShieldedOuts(TxoID val)
     {
         storage::setVar(*this, kStateSummaryShieldedOutsDBPath, val);
+    }
+
+    uint8_t IWalletDB::get_MaxPrivacyLockTimeLimitHours() const
+    {
+        uint8_t ret = kDefaultMaxPrivacyLockTimeLimitHours;
+        storage::getVar(*this, kMaxPrivacyLockTimeLimitHours, ret);
+        return ret;
+    }
+
+    void IWalletDB::set_MaxPrivacyLockTimeLimitHours(uint8_t val)
+    {
+        storage::setVar(*this, kMaxPrivacyLockTimeLimitHours, val);
     }
 
     void IWalletDB::addStatusInterpreterCreator(TxType txType, TxStatusInterpreter::Creator interpreterCreator)
@@ -5159,14 +5173,22 @@ namespace beam::wallet
             if (c.m_confirmHeight != MaxHeight)
             {
                 const auto* packedMessage = ShieldedTxo::User::ToPackedMessage(c.m_CoinID.m_User);
-                if (packedMessage->m_MaxPrivacyMinAnonimitySet)
+                auto mpAnonymitySet = packedMessage->m_MaxPrivacyMinAnonymitySet;
+                if (mpAnonymitySet)
                 {
-                    ShieldedCoin::UnlinkStatus unlinkStatus;
-                    unlinkStatus.Init(c, walletDB.get_ShieldedOuts());
-                    if (unlinkStatus.m_Progress < 100)
+                    auto timeLimit = walletDB.get_MaxPrivacyLockTimeLimitHours();
+                    Block::SystemState::ID stateID = {};
+                    walletDB.getSystemStateID(stateID);
+
+                    if (!timeLimit || c.m_confirmHeight + timeLimit * 60 > stateID.m_Height)
                     {
-                        c.m_Status = ShieldedCoin::Status::Maturing;
-                        return;
+                        ShieldedCoin::UnlinkStatus unlinkStatus;
+                        unlinkStatus.Init(c, walletDB.get_ShieldedOuts());
+                        if (unlinkStatus.m_Progress < 100 * mpAnonymitySet / 64U)
+                        {
+                            c.m_Status = ShieldedCoin::Status::Maturing;
+                            return;
+                        }
                     }
                 }
 
@@ -5186,7 +5208,7 @@ namespace beam::wallet
                 return;
             }
 
-            if (storage::IsOngoingTx(walletDB, c.m_spentTxId))
+            if (storage::IsOngoingTx(walletDB, c.m_createTxId))
             {
                 c.m_Status = ShieldedCoin::Status::Incoming;
                 return;

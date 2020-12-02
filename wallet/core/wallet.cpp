@@ -444,7 +444,7 @@ namespace beam::wallet
 
     bool Wallet::MyRequestShieldedOutputsAt::operator < (const MyRequestShieldedOutputsAt& x) const
     {
-        return false;
+        return m_Msg.m_Height < x.m_Msg.m_Height;
     }
 
     bool Wallet::MyRequestBodyPack::operator < (const MyRequestBodyPack& x) const
@@ -1854,7 +1854,7 @@ namespace beam::wallet
         std::copy_n(message->m_TxID.m_pData, 16, txID.begin());
 
         TxAddressType addressType = TxAddressType::Offline;
-        if (message->m_MaxPrivacyMinAnonimitySet)
+        if (message->m_MaxPrivacyMinAnonymitySet)
         {
             addressType = TxAddressType::MaxPrivacy;
         }
@@ -1894,9 +1894,9 @@ namespace beam::wallet
                 .SetParameter(TxParameterID::MyWalletIdentity, receiverAddress.m_Identity)
                 .SetParameter(TxParameterID::KernelID, Merkle::Hash(Zero));
 
-            if (message->m_MaxPrivacyMinAnonimitySet)
+            if (message->m_MaxPrivacyMinAnonymitySet)
             {
-                params.SetParameter(TxParameterID::MaxPrivacyMinAnonimitySet, message->m_MaxPrivacyMinAnonimitySet);
+                params.SetParameter(TxParameterID::MaxPrivacyMinAnonimitySet, message->m_MaxPrivacyMinAnonymitySet);
             }
             params.SetParameter(TxParameterID::AddressType, addressType);
 
