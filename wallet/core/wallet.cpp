@@ -449,7 +449,7 @@ namespace beam::wallet
 
     bool Wallet::MyRequestBodyPack::operator < (const MyRequestBodyPack& x) const
     {
-        return false;
+        return m_Msg.m_Top < x.m_Msg.m_Top;
     }
 
     void Wallet::RequestHandler::OnComplete(Request& r)
