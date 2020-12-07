@@ -276,6 +276,8 @@ namespace beam::wallet
         }
 
         storage::setVar(*m_WalletDB, s_szNextEvt, 0);
+        m_WalletDB->deleteEventsFrom(Rules::HeightGenesis - 1);
+        RequestBodies(0, 1);
         RequestEvents();
     }
 
@@ -439,7 +441,7 @@ namespace beam::wallet
 
     bool Wallet::MyRequestStateSummary::operator < (const MyRequestStateSummary& x) const
     {
-        return false;
+        return this < &x;
     }
 
     bool Wallet::MyRequestShieldedOutputsAt::operator < (const MyRequestShieldedOutputsAt& x) const
@@ -448,6 +450,11 @@ namespace beam::wallet
     }
 
     bool Wallet::MyRequestBodyPack::operator < (const MyRequestBodyPack& x) const
+    {
+        return m_Msg.m_Top < x.m_Msg.m_Top;
+    }
+
+    bool Wallet::MyRequestBody::operator < (const MyRequestBody& x) const
     {
         return m_Msg.m_Top < x.m_Msg.m_Top;
     }
@@ -1079,151 +1086,277 @@ namespace beam::wallet
         r.m_callback(r.m_Msg.m_Height, r.m_Res.m_ShieldedOuts);
     }
 
-    void Wallet::OnRequestComplete(MyRequestBodyPack& r)
+    struct Wallet::RecognizerHandler : NodeProcessor::Recognizer::IHandler
     {
-        struct RecognizerHandler : NodeProcessor::Recognizer::IHandler
+        Wallet& m_Wallet;
+        Key::IPKdf::Ptr m_pOwner;
+        std::vector<ShieldedTxo::Viewer> m_vSh;
+        RecognizerHandler(Wallet& wallet, const Key::IPKdf::Ptr& pKdf, Key::Index nMaxShieldedIdx = 1)
+            : m_Wallet(wallet)
+            , m_pOwner(pKdf)
         {
-            Wallet& m_Wallet;
-            Key::IPKdf::Ptr m_pOwner;
-            std::vector<ShieldedTxo::Viewer> m_vSh;
-            RecognizerHandler(Wallet& wallet, const Key::IPKdf::Ptr& pKdf, Key::Index nMaxShieldedIdx = 1)
-                : m_Wallet(wallet)
-                , m_pOwner(pKdf)
+            if (pKdf)
             {
-                if (pKdf)
-                {
-                    m_vSh.resize(nMaxShieldedIdx);
+                m_vSh.resize(nMaxShieldedIdx);
 
-                    for (Key::Index nIdx = 0; nIdx < nMaxShieldedIdx; nIdx++)
-                        m_vSh[nIdx].FromOwner(*pKdf, nIdx);
-                }
+                for (Key::Index nIdx = 0; nIdx < nMaxShieldedIdx; nIdx++)
+                    m_vSh[nIdx].FromOwner(*pKdf, nIdx);
             }
-            void get_ViewerKeys(NodeProcessor::ViewerKeys& vk) override
-            {
-                vk.m_pMw = m_pOwner.get();
+        }
+        void get_ViewerKeys(NodeProcessor::ViewerKeys& vk) override
+        {
+            vk.m_pMw = m_pOwner.get();
 
-                vk.m_nSh = static_cast<Key::Index>(m_vSh.size());
-                if (vk.m_nSh)
-                    vk.m_pSh = &m_vSh.front();
+            vk.m_nSh = static_cast<Key::Index>(m_vSh.size());
+            if (vk.m_nSh)
+                vk.m_pSh = &m_vSh.front();
+        }
+
+        void OnEvent(Height h, const proto::Event::Base& evt) override
+        {
+            switch (evt.get_Type())
+            {
+            case proto::Event::Type::Utxo:
+            {
+                auto event = Cast::Up<const proto::Event::Utxo&>(evt);
+                // filter-out false positives
+                if (!m_Wallet.m_WalletDB->IsRecoveredMatch(event.m_Cid, event.m_Commitment))
+                    return;
+
+                bool bAdd = 0 != (proto::Event::Flags::Add & event.m_Flags);
+                m_Wallet.ProcessEventUtxo(event.m_Cid, h, event.m_Maturity, bAdd, event.m_User);
+            }break;
+            case proto::Event::Type::Shielded:
+            {
+                auto event = Cast::Up<const proto::Event::Shielded&>(evt);
+                m_Wallet.ProcessEventShieldedUtxo(event, h);
+            }break;
+            default:
+                break;
             }
+        }
 
-            void OnEvent(Height h, const proto::Event::Base& evt) override
+        void AssetEvtsGetStrict(NodeDB::AssetEvt& event, Height h, uint32_t nKrnIdx) override
+        {
+        }
+
+        void InsertEvent(Height h, const Blob& b, const Blob& k) override
+        {
+            m_Wallet.m_WalletDB->insertEvent(h, b, k);
+        }
+
+        struct WalletDBWalkerEvent : NodeProcessor::Recognizer::WalkerEventBase
+        {
+            IWalletDB::Ptr m_WalletDB;
+            struct Event
             {
-                switch (evt.get_Type())
-                {
-                case proto::Event::Type::Utxo:
-                    {
-                        auto event = Cast::Up<const proto::Event::Utxo&>(evt);
-                        // filter-out false positives
-                        if (!m_Wallet.m_WalletDB->IsRecoveredMatch(event.m_Cid, event.m_Commitment))
-                            return;
-
-                        bool bAdd = 0 != (proto::Event::Flags::Add & event.m_Flags);
-                        m_Wallet.ProcessEventUtxo(event.m_Cid, h, event.m_Maturity, bAdd, event.m_User);
-                    }break;
-                case proto::Event::Type::Shielded:
-                    {
-                        auto event = Cast::Up<const proto::Event::Shielded&>(evt);
-                        m_Wallet.ProcessEventShieldedUtxo(event, h);
-                    }break;
-                default:
-                    break;
-                }
-            }
-
-            void AssetEvtsGetStrict(NodeDB::AssetEvt& event, Height h, uint32_t nKrnIdx) override 
-            {
-            }
-
-            void InsertEvent(Height h, const Blob& b, const Blob& k) override 
-            {
-                m_Wallet.m_WalletDB->insertEvent(h, b, k);
-            }
-
-            struct WalletDBWalkerEvent : NodeProcessor::Recognizer::WalkerEventBase
-            {
-                IWalletDB::Ptr m_WalletDB;
-                struct Event
-                {
-                    Height m_Height;
-                    ByteBuffer m_Body;
-                };
-                std::queue<Event> m_Events;
-                Event m_CurrentEvent;
-                Blob m_Body;
-                WalletDBWalkerEvent(IWalletDB::Ptr walletDB)
-                    : m_WalletDB(walletDB)
-                {
-                }
-                void Find(const Blob& key)
-                {
-                    m_WalletDB->visitEvents(0, key, [this](Height h, ByteBuffer&& b)
-                    {
-                        m_Events.push({ h, std::move(b) });
-                        return true;
-                    });
-                }
-                bool MoveNext() override 
-                {
-                    if (m_Events.empty())
-                        return false;
-                    m_CurrentEvent = std::move(m_Events.front());
-                    m_Body = Blob(m_CurrentEvent.m_Body);
-                    m_Events.pop();
-                    return true;
-                }
-                const Blob& get_Body() const override 
-                {
-                    return m_Body;
-                }
+                Height m_Height;
+                ByteBuffer m_Body;
             };
-
-            std::unique_ptr<NodeProcessor::Recognizer::WalkerEventBase> FindEvents(const Blob& key) override
+            std::queue<Event> m_Events;
+            Event m_CurrentEvent;
+            Blob m_Body;
+            WalletDBWalkerEvent(IWalletDB::Ptr walletDB)
+                : m_WalletDB(walletDB)
             {
-                auto w = std::make_unique<WalletDBWalkerEvent>(m_Wallet.m_WalletDB);
-                w->Find(key);
-                return w;
+            }
+            void Find(const Blob& key)
+            {
+                m_WalletDB->visitEvents(0, key, [this](Height h, ByteBuffer&& b)
+                {
+                    m_Events.push({ h, std::move(b) });
+                    return true;
+                });
+            }
+            bool MoveNext() override
+            {
+                if (m_Events.empty())
+                    return false;
+                m_CurrentEvent = std::move(m_Events.front());
+                m_Body = Blob(m_CurrentEvent.m_Body);
+                m_Events.pop();
+                return true;
+            }
+            const Blob& get_Body() const override
+            {
+                return m_Body;
             }
         };
+
+        std::unique_ptr<NodeProcessor::Recognizer::WalkerEventBase> FindEvents(const Blob& key) override
+        {
+            auto w = std::make_unique<WalletDBWalkerEvent>(m_Wallet.m_WalletDB);
+            w->Find(key);
+            return w;
+        }
+    };
+
+    void Wallet::OnRequestComplete(MyRequestBodyPack& r)
+    {
         RecognizerHandler h(*this, m_WalletDB->get_MasterKdf());
         NodeProcessor::Extra extra = { 0 };
         NodeProcessor::Recognizer recognizer(h, extra);
         Block::Body block;
-        try {
+        try 
+        {
             Deserializer der;
-            der.reset(r.m_Res.m_Body.m_Perishable);
-            der& Cast::Down<Block::BodyBase>(block);
-            der& Cast::Down<TxVectors::Perishable>(block);
+            Height startHeight = r.m_StartHeight;
+            for (const auto& b : r.m_Res.m_Bodies)
+            {
+                if (startHeight == 0)
+                {
+                    ECC::Hash::Value hv;
+                    ECC::Hash::Processor()
+                        << Blob(b.m_Eternal)
+                        >> hv;
 
-            der.reset(r.m_Res.m_Body.m_Eternal);
-            der& Cast::Down<TxVectors::Eternal>(block);
+                    if (Rules::get().TreasuryChecksum != hv)
+                    {
+                        throw "invalid";
+                    }
+                }
+
+                der.reset(b.m_Perishable);
+                der& Cast::Down<Block::BodyBase>(block);
+                der& Cast::Down<TxVectors::Perishable>(block);
+
+                der.reset(b.m_Eternal);
+                der& Cast::Down<TxVectors::Eternal>(block);
+                
+                recognizer.Recognize(block, startHeight, 0, false);
+                ++startHeight;
+            }
+            if (!r.m_Res.m_Bodies.empty() && startHeight < r.m_Msg.m_Top.m_Height)
+            {
+                RequestBodies(r.m_Msg.m_Height0, startHeight);
+            }
         }
         catch (const std::exception&)
         {
             LOG_WARNING()  << "Wallet: block deserialization failed";
             return;
         }
-        Block::SystemState::Full tip;
-        get_tip(tip);
-        recognizer.Recognize(block, tip.m_Height, 0, false);
+    }
+
+    void Wallet::OnRequestComplete(MyRequestBody& r)
+    {
+        RecognizerHandler h(*this, m_WalletDB->get_MasterKdf());
+        NodeProcessor::Extra extra = { 0 };
+        NodeProcessor::Recognizer recognizer(h, extra);
+        Block::Body block;
+        try
+        {
+            Deserializer der;
+            {
+                if (r.m_Height == 0)
+                {
+                    // handle treasury
+                    return;
+                }
+                der.reset(r.m_Res.m_Body.m_Perishable);
+                der& Cast::Down<Block::BodyBase>(block);
+                der& Cast::Down<TxVectors::Perishable>(block);
+
+                der.reset(r.m_Res.m_Body.m_Eternal);
+                der& Cast::Down<TxVectors::Eternal>(block);
+
+                recognizer.Recognize(block, r.m_Height, 0, false);
+                if (r.m_Height < r.m_Msg.m_Top.m_Height)
+                {
+                    RequestBodies(r.m_Height, r.m_Height+1);
+                }
+            }
+        }
+        catch (const std::exception&)
+        {
+            LOG_WARNING() << "Wallet: block deserialization failed";
+            return;
+        }
+    }
+
+    void Wallet::RequestBodies()
+    {
+        Height currentHeight = m_WalletDB->getCurrentHeight();
+        RequestBodies(currentHeight, currentHeight + 1);
+    }
+
+    void Wallet::RequestBodies(Height currentHeight, Height startHeight)
+    {
+        if (!m_OwnedNodesOnline)
+        {
+            Block::SystemState::Full newTip;
+            m_WalletDB->get_History().get_Tip(newTip);
+
+            //if (currentHeight < Rules::get().HeightGenesis)
+            //{
+            //    MyRequestBody::Ptr pReq(new MyRequestBody);
+            //
+            //    pReq->m_Msg.m_FlagP = proto::BodyBuffers::Full;
+            //    pReq->m_Msg.m_FlagE = proto::BodyBuffers::Full;
+            //
+            //    pReq->m_Height = currentHeight;
+            //
+            //    if (PostReqUnique(*pReq))
+            //    {
+            //        LOG_INFO() << "Requesting block pack for " << pReq->m_Msg.m_Top;
+            //    }
+            //    return;
+            //}
+
+
+            Height hCountExtra = newTip.m_Height - startHeight;
+            if (hCountExtra)
+            {
+                MyRequestBodyPack::Ptr pReq(new MyRequestBodyPack);
+
+                pReq->m_Msg.m_FlagP = proto::BodyBuffers::Full;
+                pReq->m_Msg.m_FlagE = proto::BodyBuffers::Full;
+
+                newTip.get_ID(pReq->m_Msg.m_Top);
+
+                Height r = Rules::get().MaxRollback;
+                Height count = std::min(newTip.m_Height - currentHeight, r * 2);
+                pReq->m_StartHeight = startHeight;
+                pReq->m_Msg.m_CountExtra = hCountExtra;
+                pReq->m_Msg.m_Height0 = currentHeight;
+                pReq->m_Msg.m_HorizonLo1 = newTip.m_Height - count;
+                pReq->m_Msg.m_HorizonHi1 = newTip.m_Height;
+
+                if (PostReqUnique(*pReq))
+                {
+                    LOG_INFO() << "Requesting block pack for " << pReq->m_Msg.m_Top;
+                }
+            }
+            else
+            {
+                MyRequestBody::Ptr pReq(new MyRequestBody);
+
+                pReq->m_Msg.m_FlagP = proto::BodyBuffers::Full;
+                pReq->m_Msg.m_FlagE = proto::BodyBuffers::Full;
+
+                newTip.get_ID(pReq->m_Msg.m_Top);
+                pReq->m_Height = pReq->m_Msg.m_Top.m_Height;
+                pReq->m_Msg.m_CountExtra = hCountExtra;
+
+                if (PostReqUnique(*pReq))
+                {
+                    LOG_INFO() << "Requesting block pack for " << pReq->m_Msg.m_Top;
+                }
+            }
+            
+            return;
+        }
     }
 
     void Wallet::RequestEvents()
     {
-        Block::SystemState::Full sTip;
-        m_WalletDB->get_History().get_Tip(sTip);
         if (!m_OwnedNodesOnline)
         {
-            MyRequestBodyPack::Ptr pReq(new MyRequestBodyPack);
-            pReq->m_Msg.m_FlagP = proto::BodyBuffers::Full;
-            pReq->m_Msg.m_FlagE = proto::BodyBuffers::Full;
-            sTip.get_ID(pReq->m_Msg.m_Top);
-            if (PostReqUnique(*pReq))
-            {
-                LOG_INFO() << "Requesting block pack for " << pReq->m_Msg.m_Top;
-            }
             return;
         }
+
+        Block::SystemState::Full sTip;
+        m_WalletDB->get_History().get_Tip(sTip);
 
         Height h = GetEventsHeightNext();
         assert(h <= sTip.m_Height + 1);
@@ -1511,6 +1644,7 @@ namespace beam::wallet
         sTip.get_ID(id);
         LOG_INFO() << "Sync up to " << id;
 
+        RequestBodies();
         RequestEvents();
         RequestStateSummary();
 
@@ -1570,10 +1704,10 @@ namespace beam::wallet
 
         m_LastSyncTotal = 0;
 
-        saveKnownState();
+        SaveKnownState();
     }
 
-    void Wallet::saveKnownState()
+    void Wallet::SaveKnownState()
     {
         Block::SystemState::Full sTip;
         get_tip(sTip);
@@ -1586,7 +1720,7 @@ namespace beam::wallet
 
         m_WalletDB->setSystemStateID(id);
         LOG_INFO() << "Current state is " << id;
-        notifySyncProgress();
+        NotifySyncProgress();
 
         if (!IsValidTimeStamp(sTip.m_TimeStamp))
         {
@@ -1608,7 +1742,7 @@ namespace beam::wallet
         }
     }
 
-    void Wallet::notifySyncProgress()
+    void Wallet::NotifySyncProgress()
     {
         uint32_t n = SyncRemains();
         for (const auto sub : m_subscribers)
@@ -1627,7 +1761,7 @@ namespace beam::wallet
         int p = static_cast<int>((nDone * 100) / m_LastSyncTotal);
         LOG_INFO() << "Synchronizing with node: " << p << "% (" << nDone << "/" << m_LastSyncTotal << ")";
 
-        notifySyncProgress();
+        NotifySyncProgress();
     }
 
     void Wallet::SendTransactionToNode(const TxID& txId, Transaction::Ptr data, SubTxID subTxID)

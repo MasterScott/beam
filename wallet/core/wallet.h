@@ -209,12 +209,14 @@ namespace beam::wallet
         void CheckSyncDone();
         void getUtxoProof(const Coin&);
         void report_sync_progress();
-        void notifySyncProgress();
+        void NotifySyncProgress();
         void UpdateTransaction(const TxID& txID);
         void UpdateTransaction(BaseTransaction::Ptr tx);
         void UpdateOnSynced(BaseTransaction::Ptr tx);
         void UpdateOnNextTip(BaseTransaction::Ptr tx);
-        void saveKnownState();
+        void SaveKnownState();
+        void RequestBodies();
+        void RequestBodies(Height currentHeight, Height startHeight);
         void RequestEvents();
         void AbortEvents();
         void ProcessEventUtxo(const CoinID&, Height h, Height hMaturity, bool bAdd, const Output::User& user);
@@ -303,6 +305,14 @@ namespace beam::wallet
             {
                 std::function<void(Height, TxoID)> m_callback;
             };
+            struct BodyPack
+            {
+                Height m_StartHeight;
+            };
+            struct Body
+            {
+                Height m_Height;
+            };
         };
 
 #define THE_MACRO(type, msgOut, msgIn) \
@@ -379,6 +389,7 @@ namespace beam::wallet
             IMPLEMENT_GET_PARENT_OBJ(Wallet, m_VoucherManager)
         } m_VoucherManager;
 
+        struct RecognizerHandler;
 
         // List of registered transaction creators
         // Creators can store some objects for the transactions, 

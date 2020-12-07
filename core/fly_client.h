@@ -47,7 +47,8 @@ namespace proto {
 		macro(Asset,             GetProofAsset,         ProofAsset) \
 		macro(StateSummary,      GetStateSummary,       StateSummary) \
 		macro(ShieldedOutputsAt, GetShieldedOutputsAt,  ShieldedOutputsAt) \
-		macro(BodyPack,          GetBodyPack,           Body)
+		macro(BodyPack,          GetBodyPack,           BodyPack) \
+		macro(Body,              GetBodyPack,           Body)
 
 		class Request
 		{
@@ -235,6 +236,7 @@ namespace proto {
 				virtual void OnMsg(proto::BbsMsg&& msg) override;
 				virtual void OnMsg(proto::EventsSerif&& msg) override;
 				virtual void OnMsg(PeerInfo&& msg) override;
+				virtual void OnMsg(DataMissing&& msg) override;
 #define THE_MACRO(type, msgOut, msgIn) \
 				virtual void OnMsg(proto::msgIn&&) override; \
 				bool IsSupported(Request##type&); \
