@@ -1124,7 +1124,14 @@ private:
 
         void OnMsg(proto::GetBodyPack&& msg) override
         {
-            Send(proto::Body{});
+            if (msg.m_CountExtra)
+            {
+                Send(proto::BodyPack{});
+            }
+            else
+            {
+                Send(proto::Body{});
+            }
         }
 
 
