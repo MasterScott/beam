@@ -1174,6 +1174,9 @@ namespace beam::wallet
                     return false;
                 m_CurrentEvent = std::move(m_Events.front());
                 m_Body = Blob(m_CurrentEvent.m_Body);
+                // skip index
+                m_Body.n -= sizeof(NodeDB::EventIndexType);
+                ((const uint8_t*&)m_Body.p) += sizeof(NodeDB::EventIndexType);
                 m_Events.pop();
                 return true;
             }

@@ -254,7 +254,9 @@ namespace beam::wallet
         macro(Utxo) \
         macro(Kernel) \
         macro(Events) \
-        macro(StateSummary)
+        macro(StateSummary) \
+        macro(BodyPack) \
+        macro(Body) 
 
         struct AllTasks {
 #define THE_MACRO(type, msgOut, msgIn) struct type { static const bool b = false; };

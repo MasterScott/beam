@@ -606,7 +606,15 @@ namespace beam::wallet
 
             void bind(int col, const Blob& b)
             {
-                bind(col, b.p, b.n);
+                // According to our convention empty blob is NOT NULL, it should be an empty BLOB field.
+                // During initialization from buffer, if the buffer size is 0 - the x.p is left uninitialized.
+                //
+                // In sqlite code if x.p is NULL - it would treat the field as NULL, rather than an empty blob.
+                // And if the uninitialized x.p is occasionally NULL - we get wrong behavior.
+                //
+                // Hence - we work this around, use `this`, as an arbitrary non-NULL pointer
+                const void* pPtr = b.n ? b.p : this;
+                bind(col, pPtr, b.n);
             }
 
             template<uint32_t nBytes_>
