@@ -29,7 +29,7 @@
 #include <iomanip>
 #include <numeric>
 #include <queue>
-#include "node/processor.h"
+
 
 namespace beam::wallet
 {
@@ -451,12 +451,12 @@ namespace beam::wallet
 
     bool Wallet::MyRequestBodyPack::operator < (const MyRequestBodyPack& x) const
     {
-        return m_Msg.m_Top < x.m_Msg.m_Top;
+        return false;
     }
 
     bool Wallet::MyRequestBody::operator < (const MyRequestBody& x) const
     {
-        return m_Msg.m_Top < x.m_Msg.m_Top;
+        return false;
     }
 
     void Wallet::RequestHandler::OnComplete(Request& r)
@@ -1197,8 +1197,7 @@ namespace beam::wallet
     void Wallet::OnRequestComplete(MyRequestBodyPack& r)
     {
         RecognizerHandler h(*this, m_WalletDB->get_MasterKdf());
-        NodeProcessor::Extra extra = { 0 };
-        NodeProcessor::Recognizer recognizer(h, extra);
+        NodeProcessor::Recognizer recognizer(h, m_Extra);
         Block::Body block;
         try 
         {
@@ -1206,26 +1205,13 @@ namespace beam::wallet
             Height startHeight = r.m_StartHeight;
             for (const auto& b : r.m_Res.m_Bodies)
             {
-                if (startHeight == 0)
-                {
-                    ECC::Hash::Value hv;
-                    ECC::Hash::Processor()
-                        << Blob(b.m_Eternal)
-                        >> hv;
-
-                    if (Rules::get().TreasuryChecksum != hv)
-                    {
-                        throw "invalid";
-                    }
-                }
-
                 der.reset(b.m_Perishable);
                 der& Cast::Down<Block::BodyBase>(block);
                 der& Cast::Down<TxVectors::Perishable>(block);
 
                 der.reset(b.m_Eternal);
                 der& Cast::Down<TxVectors::Eternal>(block);
-                
+                HandleBlock(block);
                 recognizer.Recognize(block, startHeight, 0, false);
                 ++startHeight;
             }
@@ -1236,7 +1222,7 @@ namespace beam::wallet
         }
         catch (const std::exception&)
         {
-            LOG_WARNING()  << "Wallet: block deserialization failed";
+            //LOG_WARNING()  << "Wallet: block deserialization failed";
             return;
         }
     }
@@ -1245,7 +1231,7 @@ namespace beam::wallet
     {
         RecognizerHandler h(*this, m_WalletDB->get_MasterKdf());
         NodeProcessor::Extra extra = { 0 };
-        NodeProcessor::Recognizer recognizer(h, extra);
+        NodeProcessor::Recognizer recognizer(h, m_Extra);
         Block::Body block;
         try
         {
@@ -1263,6 +1249,8 @@ namespace beam::wallet
                 der.reset(r.m_Res.m_Body.m_Eternal);
                 der& Cast::Down<TxVectors::Eternal>(block);
 
+                HandleBlock(block);
+
                 recognizer.Recognize(block, r.m_Height, 0, false);
                 if (r.m_Height < r.m_Msg.m_Top.m_Height)
                 {
@@ -1272,8 +1260,26 @@ namespace beam::wallet
         }
         catch (const std::exception&)
         {
-            LOG_WARNING() << "Wallet: block deserialization failed";
+            //LOG_WARNING() << "Wallet: block deserialization failed";
             return;
+        }
+    }
+
+    void Wallet::HandleBlock(Block::Body& block)
+    {
+        // TODO: improve this
+        for (auto& input : block.m_vInputs)
+        {
+            m_WalletDB->visitCoins([&](const Coin& c)
+            {
+                Coin c2 = c;
+                if (m_WalletDB->IsRecoveredMatch(c2.m_ID, input->m_Commitment))
+                {
+                    input->m_Internal.m_Maturity = c2.m_maturity;
+                    return false;
+                }
+                return true;
+            });
         }
     }
 
@@ -1325,10 +1331,7 @@ namespace beam::wallet
                 pReq->m_Msg.m_HorizonLo1 = newTip.m_Height - count;
                 pReq->m_Msg.m_HorizonHi1 = newTip.m_Height;
 
-                if (PostReqUnique(*pReq))
-                {
-                    LOG_INFO() << "Requesting block pack for " << pReq->m_Msg.m_Top;
-                }
+                PostReqUnique(*pReq);
             }
             else
             {
@@ -1341,10 +1344,7 @@ namespace beam::wallet
                 pReq->m_Height = pReq->m_Msg.m_Top.m_Height;
                 pReq->m_Msg.m_CountExtra = hCountExtra;
 
-                if (PostReqUnique(*pReq))
-                {
-                    LOG_INFO() << "Requesting block pack for " << pReq->m_Msg.m_Top;
-                }
+                PostReqUnique(*pReq);
             }
             
             return;

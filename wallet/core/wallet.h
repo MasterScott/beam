@@ -18,6 +18,7 @@
 #include "common.h"
 #include "base_transaction.h"
 #include "core/fly_client.h"
+#include "node/processor.h"
 
 namespace beam::wallet
 {
@@ -215,6 +216,7 @@ namespace beam::wallet
         void UpdateOnSynced(BaseTransaction::Ptr tx);
         void UpdateOnNextTip(BaseTransaction::Ptr tx);
         void SaveKnownState();
+        void HandleBlock(Block::Body& block);
         void RequestBodies();
         void RequestBodies(Height currentHeight, Height startHeight);
         void RequestEvents();
@@ -422,5 +424,6 @@ namespace beam::wallet
         // Counter of running transaction updates. Used by Cold wallet
         int m_AsyncUpdateCounter = 0;
         bool m_StoredMessagesProcessed = false; // this should happen only once, but not in destructor;
+        NodeProcessor::Extra m_Extra = { 0 };
     };
 }
