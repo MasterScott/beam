@@ -1230,7 +1230,6 @@ namespace beam::wallet
     void Wallet::OnRequestComplete(MyRequestBody& r)
     {
         RecognizerHandler h(*this, m_WalletDB->get_MasterKdf());
-        NodeProcessor::Extra extra = { 0 };
         NodeProcessor::Recognizer recognizer(h, m_Extra);
         Block::Body block;
         try
