@@ -245,8 +245,6 @@ namespace beam::wallet
 
     private:
 
-        static const char s_szNextEvt[];
-
 // The following macros define
 // Wallet to Node messages (requests) to get update on blockchain state
 // These messages are used during the synchronization process

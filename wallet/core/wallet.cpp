@@ -157,9 +157,12 @@ namespace beam::wallet
         }
         return parameters;
     }
-
-    const char Wallet::s_szNextEvt[] = "NextUtxoEvent"; // any event, not just UTXO. The name is for historical reasons
-
+    namespace
+    {
+        constexpr char s_szNextEvt[] = "NextUtxoEvent"; // any event, not just UTXO. The name is for historical reasons
+        constexpr char s_szShieldedOutputs[] = "ShildedOutputs";
+    }
+    
     Wallet::Wallet(IWalletDB::Ptr walletDB, TxCompletedAction&& action, UpdateCompletedAction&& updateCompleted)
         : m_WalletDB{ walletDB }
         , m_TxCompletedAction{ move(action) }
@@ -170,6 +173,7 @@ namespace beam::wallet
         assert(walletDB);
         // the only default type of transaction
         RegisterTransactionType(TxType::Simple, make_unique<SimpleTransaction::Creator>(m_WalletDB));
+        storage::getVar(*m_WalletDB, s_szShieldedOutputs, m_Extra.m_ShieldedOutputs);
     }
 
     Wallet::~Wallet()
@@ -277,6 +281,8 @@ namespace beam::wallet
 
         storage::setVar(*m_WalletDB, s_szNextEvt, 0);
         m_WalletDB->deleteEventsFrom(Rules::HeightGenesis - 1);
+        m_Extra.m_ShieldedOutputs = 0;
+        storage::setVar(*m_WalletDB, s_szShieldedOutputs, 0);
         RequestBodies(0, 1);
         RequestEvents();
     }
@@ -1130,6 +1136,7 @@ namespace beam::wallet
             {
                 auto event = Cast::Up<const proto::Event::Shielded&>(evt);
                 m_Wallet.ProcessEventShieldedUtxo(event, h);
+                storage::setVar(*m_Wallet.m_WalletDB, s_szShieldedOutputs, m_Wallet.m_Extra.m_ShieldedOutputs);
             }break;
             default:
                 break;
