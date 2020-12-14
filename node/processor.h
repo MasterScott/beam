@@ -544,7 +544,7 @@ public:
 		};
 		Recognizer(IHandler& h, Extra& extra);
 
-		void Recognize(const Block::Body& block, Height height, uint32_t shieldedOuts, bool validateShieldedOuts = true);
+		void Recognize(const TxVectors::Full& block, Height height, uint32_t shieldedOuts, bool validateShieldedOuts = true);
 
 		void Recognize(const Input&, Height);
 		void Recognize(const Output&, Height, Key::IPKdf&);

@@ -216,9 +216,10 @@ namespace beam::wallet
         void UpdateOnSynced(BaseTransaction::Ptr tx);
         void UpdateOnNextTip(BaseTransaction::Ptr tx);
         void SaveKnownState();
-        void HandleBlock(Block::Body& block);
+        void HandleBlock(TxVectors::Full& block);
         void RequestBodies();
         void RequestBodies(Height currentHeight, Height startHeight);
+        void AbortBodiesRequests();
         void RequestEvents();
         void AbortEvents();
         void ProcessEventUtxo(const CoinID&, Height h, Height hMaturity, bool bAdd, const Output::User& user);

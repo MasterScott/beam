@@ -18,6 +18,7 @@
 #include "core/ecc_native.h"
 #include "core/block_crypt.h"
 #include "core/shielded.h"
+#include "core/treasury.h"
 #include "utility/logger.h"
 #include "utility/helpers.h"
 #include "simple_transaction.h"
@@ -214,13 +215,19 @@ namespace beam::wallet
         if (bUp)
         {
             if (!m_OwnedNodesOnline++) // on first connection to the node
+            {
+                AbortBodiesRequests();
                 RequestEvents(); // maybe time to refresh UTXOs
+            }
         }
         else
         {
             assert(m_OwnedNodesOnline); // check that m_OwnedNodesOnline is positive number
             if (!--m_OwnedNodesOnline)
+            {
                 AbortEvents();
+                RequestBodies();
+            }
         }
 
         for (const auto sub : m_subscribers)
@@ -248,7 +255,7 @@ namespace beam::wallet
     void Wallet::Rescan()
     {
         AbortEvents();
-
+        AbortBodiesRequests();
         // We save all Incoming coins of active transactions and
         // restore them after clearing db. This will save our outgoing & available amounts
         std::vector<Coin> ocoins;
@@ -1241,13 +1248,63 @@ namespace beam::wallet
         Block::Body block;
         try
         {
-            Deserializer der;
             {
                 if (r.m_Height == 0)
                 {
                     // handle treasury
+                    const Blob& blob = r.m_Res.m_Body.m_Eternal;
+                    if (Rules::get().TreasuryChecksum == Zero)
+                        return; // should be no treasury
+
+                    ECC::Hash::Value hv;
+                    ECC::Hash::Processor()
+                        << blob
+                        >> hv;
+
+                    if (Rules::get().TreasuryChecksum != hv)
+                        return;
+
+                    Deserializer der;
+                    der.reset(blob.p, blob.n);
+                    Treasury::Data td;
+
+                    try {
+                        der& td;
+                    }
+                    catch (const std::exception&) {
+                        LOG_WARNING() << "Treasury corrupt";
+                        return;// false;
+                    }
+
+                    if (!td.IsValid())
+                    {
+                        LOG_WARNING() << "Treasury validation failed";
+                        return;// false;
+                    }
+
+                    std::vector<Treasury::Data::Burst> vBursts = td.get_Bursts();
+
+                    std::ostringstream os;
+                    os << "Treasury check. Total bursts=" << vBursts.size();
+
+                    for (size_t i = 0; i < vBursts.size(); i++)
+                    {
+                        const Treasury::Data::Burst& b = vBursts[i];
+                        os << "\n\t" << "Height=" << b.m_Height << ", Value=" << b.m_Value;
+                    }
+
+                    LOG_INFO() << os.str();
+
+                    ///
+
+                    for (size_t iG = 0; iG < td.m_vGroups.size(); iG++)
+                    {
+                        recognizer.Recognize(td.m_vGroups[iG].m_Data, r.m_Height, 0, false);
+                    }
+
                     return;
                 }
+                Deserializer der;
                 der.reset(r.m_Res.m_Body.m_Perishable);
                 der& Cast::Down<Block::BodyBase>(block);
                 der& Cast::Down<TxVectors::Perishable>(block);
@@ -1271,7 +1328,7 @@ namespace beam::wallet
         }
     }
 
-    void Wallet::HandleBlock(Block::Body& block)
+    void Wallet::HandleBlock(TxVectors::Full& block)
     {
         // TODO: improve this
         for (auto& input : block.m_vInputs)
@@ -1302,22 +1359,18 @@ namespace beam::wallet
             Block::SystemState::Full newTip;
             m_WalletDB->get_History().get_Tip(newTip);
 
-            //if (currentHeight < Rules::get().HeightGenesis)
-            //{
-            //    MyRequestBody::Ptr pReq(new MyRequestBody);
-            //
-            //    pReq->m_Msg.m_FlagP = proto::BodyBuffers::Full;
-            //    pReq->m_Msg.m_FlagE = proto::BodyBuffers::Full;
-            //
-            //    pReq->m_Height = currentHeight;
-            //
-            //    if (PostReqUnique(*pReq))
-            //    {
-            //        LOG_INFO() << "Requesting block pack for " << pReq->m_Msg.m_Top;
-            //    }
-            //    return;
-            //}
-
+            if (currentHeight < Rules::get().HeightGenesis)
+            {
+                MyRequestBody::Ptr pReq(new MyRequestBody);
+            
+                pReq->m_Msg.m_FlagP = proto::BodyBuffers::Full;
+                pReq->m_Msg.m_FlagE = proto::BodyBuffers::Full;
+            
+                pReq->m_Height = currentHeight;
+            
+                PostReqUnique(*pReq);
+                return;
+            }
 
             Height hCountExtra = newTip.m_Height - startHeight;
             if (hCountExtra)
@@ -1352,9 +1405,19 @@ namespace beam::wallet
 
                 PostReqUnique(*pReq);
             }
-            
+
             return;
         }
+    }
+
+
+    void Wallet::AbortBodiesRequests()
+    {
+        if (!m_PendingBodyPack.empty())
+            DeleteReq(*m_PendingBodyPack.begin());
+
+        if (!m_PendingBody.empty())
+            DeleteReq(*m_PendingBody.begin());
     }
 
     void Wallet::RequestEvents()

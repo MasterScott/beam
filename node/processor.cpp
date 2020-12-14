@@ -2466,7 +2466,7 @@ NodeProcessor::Recognizer::Recognizer(IHandler& h, Extra& extra)
 
 }
 
-void NodeProcessor::Recognizer::Recognize(const Block::Body& block, Height height, uint32_t shieldedOuts, bool validateShieldedOuts)
+void NodeProcessor::Recognizer::Recognize(const TxVectors::Full& block, Height height, uint32_t shieldedOuts, bool validateShieldedOuts)
 {
 	// recognize all
 	for (size_t i = 0; i < block.m_vInputs.size(); i++)

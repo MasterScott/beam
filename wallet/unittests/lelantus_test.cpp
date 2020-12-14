@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "wallet/core/common.h"
+#include "wallet/core/common_utils.h"
 #include "wallet/core/wallet_network.h"
 #include "wallet/core/wallet.h"
 #include "wallet/transactions/lelantus/push_transaction.h"
@@ -81,6 +82,87 @@ namespace
         Rules::get().UpdateChecksum();
         node.Initialize();
         node.m_PostStartSynced = true;
+    }
+}
+
+void TestTreasuryRestore()
+{
+    cout << "\nTest tresury restore\n";
+    io::Reactor::Ptr mainReactor{ io::Reactor::create() };
+    io::Reactor::Scope scope(*mainReactor);
+
+    int completedCount = 1;
+    auto completeAction = [&mainReactor, &completedCount](auto)
+    {
+        --completedCount;
+        if (completedCount == 0)
+        {
+            mainReactor->stop();
+        }
+    };
+
+    auto senderWalletDB = createSenderWalletDB(0, 0);
+    auto binaryTreasury = createTreasury(senderWalletDB, kDefaultTestAmounts);
+    TestWalletRig sender(senderWalletDB, completeAction, TestWalletRig::RegularWithoutPoWBbs);
+    auto receiverWalletDB = createReceiverWalletDB(false, true);
+    TestWalletRig receiver(receiverWalletDB, completeAction, TestWalletRig::RegularWithoutPoWBbs);
+    sender.m_Wallet.RegisterTransactionType(TxType::PushTransaction, std::make_shared<lelantus::PushTransaction::Creator>(senderWalletDB));
+    receiver.m_Wallet.RegisterTransactionType(TxType::PushTransaction, std::make_shared<lelantus::PushTransaction::Creator>(receiverWalletDB));
+
+    sender.m_Wallet.Rescan();
+    Node node;
+    NodeObserver observer([&]()
+    {
+        auto cursor = node.get_Processor().m_Cursor;
+        if (cursor.m_Sid.m_Height == Rules::get().pForks[2].m_Height + 3)
+        {
+            auto walletAddress = GenerateNewAddress(receiver.m_WalletDB, "", WalletAddress::ExpirationStatus::Never);
+            auto vouchers = GenerateVoucherList(receiver.m_WalletDB->get_KeyKeeper(), walletAddress.m_OwnID, 1);
+            auto newAddress = GenerateOfflineAddress(walletAddress, 0, vouchers);
+            auto p = ParseParameters(newAddress);
+            WALLET_CHECK(p);
+            auto parameters = lelantus::CreatePushTransactionParameters(sender.m_WalletID)
+                .SetParameter(TxParameterID::Amount, 38000000)
+                .SetParameter(TxParameterID::Fee, 12000000);
+
+            LoadReceiverParams(*p, parameters);
+
+            sender.m_Wallet.StartTransaction(parameters);
+        }
+
+        else if (cursor.m_Sid.m_Height == 40)
+        {
+            mainReactor->stop();
+        }
+    });
+
+    InitOwnNodeToTest(node, binaryTreasury, &observer, receiver.m_WalletDB->get_MasterKdf(), 32125, 200); // node detects receiver events
+
+    mainReactor->run();
+
+    WALLET_CHECK(completedCount == 0);
+    {
+        auto txHistory = sender.m_WalletDB->getTxHistory(TxType::ALL);
+        WALLET_CHECK(txHistory.size() == 1);
+        WALLET_CHECK(txHistory[0].m_txType == TxType::PushTransaction && txHistory[0].m_status == TxStatus::Completed);
+        auto coins = sender.GetCoins();
+        WALLET_CHECK(coins.size() == 4);
+        std::sort(coins.begin(), coins.end(), [](const Coin& left, const Coin& right) {return left.m_ID.m_Value < right.m_ID.m_Value; });
+
+        WALLET_CHECK(coins[0].m_ID.m_Value == 10000000);
+        WALLET_CHECK(coins[1].m_ID.m_Value == 20000000);
+        WALLET_CHECK(coins[2].m_ID.m_Value == 50000000);
+        WALLET_CHECK(coins[3].m_ID.m_Value == 90000000);
+    }
+
+    {
+        auto txHistory = receiver.m_WalletDB->getTxHistory(TxType::ALL);
+        WALLET_CHECK(txHistory.size() == 1);
+        WALLET_CHECK(txHistory[0].m_txType == TxType::PushTransaction && txHistory[0].m_status == TxStatus::Completed);
+        auto shieldedCoins = receiver.m_WalletDB->getShieldedCoins(Asset::Asset::s_BeamID);
+        WALLET_CHECK(shieldedCoins[0].m_CoinID.m_Value == 38000000);
+        WALLET_CHECK(shieldedCoins[0].m_CoinID.m_Key.m_IsCreatedByViewer == true);
+        WALLET_CHECK(shieldedCoins[0].m_Status == ShieldedCoin::Status::Available);
     }
 }
 
@@ -1352,7 +1434,7 @@ void TestReextract()
 
 int main()
 {
-    int logLevel = LOG_LEVEL_WARNING;
+    int logLevel = LOG_LEVEL_INFO;
     auto logger = beam::Logger::create(logLevel, logLevel);
     Rules::get().FakePoW = true;
     Rules::get().UpdateChecksum();
@@ -1364,6 +1446,7 @@ int main()
 
     //TestUnlinkTx();
     //TestCancelUnlinkTx();
+    TestTreasuryRestore();
     TestSimpleTx();
     TestMaxPrivacyTx();
     TestPublicAddressTx();
