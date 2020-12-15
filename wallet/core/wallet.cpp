@@ -1253,57 +1253,18 @@ namespace beam::wallet
                 {
                     // handle treasury
                     const Blob& blob = r.m_Res.m_Body.m_Eternal;
-                    if (Rules::get().TreasuryChecksum == Zero)
-                        return; // should be no treasury
-
-                    ECC::Hash::Value hv;
-                    ECC::Hash::Processor()
-                        << blob
-                        >> hv;
-
-                    if (Rules::get().TreasuryChecksum != hv)
-                        return;
-
-                    Deserializer der;
-                    der.reset(blob.p, blob.n);
                     Treasury::Data td;
-
-                    try {
-                        der& td;
-                    }
-                    catch (const std::exception&) {
-                        LOG_WARNING() << "Treasury corrupt";
-                        return;// false;
-                    }
-
-                    if (!td.IsValid())
-                    {
-                        LOG_WARNING() << "Treasury validation failed";
-                        return;// false;
-                    }
-
-                    std::vector<Treasury::Data::Burst> vBursts = td.get_Bursts();
-
-                    std::ostringstream os;
-                    os << "Treasury check. Total bursts=" << vBursts.size();
-
-                    for (size_t i = 0; i < vBursts.size(); i++)
-                    {
-                        const Treasury::Data::Burst& b = vBursts[i];
-                        os << "\n\t" << "Height=" << b.m_Height << ", Value=" << b.m_Value;
-                    }
-
-                    LOG_INFO() << os.str();
-
-                    ///
+                    if (!NodeProcessor::ExtractTreasury(blob, td))
+                        return;
 
                     for (size_t iG = 0; iG < td.m_vGroups.size(); iG++)
                     {
                         recognizer.Recognize(td.m_vGroups[iG].m_Data, r.m_Height, 0, false);
                     }
-
+                    RequestBodies(Rules::get().HeightGenesis, Rules::get().HeightGenesis + 1);
                     return;
                 }
+                
                 Deserializer der;
                 der.reset(r.m_Res.m_Body.m_Perishable);
                 der& Cast::Down<Block::BodyBase>(block);
@@ -1371,6 +1332,8 @@ namespace beam::wallet
                 PostReqUnique(*pReq);
                 return;
             }
+            if (startHeight > newTip.m_Height)
+                return;
 
             Height hCountExtra = newTip.m_Height - startHeight;
             if (hCountExtra)

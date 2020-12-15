@@ -2101,17 +2101,15 @@ struct NodeProcessor::BlockInterpretCtx
 	void EnsureAssetsUsed(NodeDB&);
 };
 
-bool NodeProcessor::HandleTreasury(const Blob& blob)
+bool NodeProcessor::ExtractTreasury(const Blob& blob, Treasury::Data& td)
 {
-	assert(!IsTreasuryHandled());
-
 	Deserializer der;
 	der.reset(blob.p, blob.n);
-	Treasury::Data td;
 
 	try {
-		der & td;
-	} catch (const std::exception&) {
+		der& td;
+	}
+	catch (const std::exception&) {
 		LOG_WARNING() << "Treasury corrupt";
 		return false;
 	}
@@ -2134,6 +2132,16 @@ bool NodeProcessor::HandleTreasury(const Blob& blob)
 	}
 
 	LOG_INFO() << os.str();
+
+	return true;
+}
+
+bool NodeProcessor::HandleTreasury(const Blob& blob)
+{
+	assert(!IsTreasuryHandled());
+	Treasury::Data td;
+	if (!ExtractTreasury(blob, td))
+		return false;
 
 	BlockInterpretCtx bic(0, true);
 	bic.SetAssetHi(*this);

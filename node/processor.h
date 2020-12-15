@@ -16,6 +16,7 @@
 
 #include "../core/radixtree.h"
 #include "../core/proto.h"
+#include "../core/treasury.h"
 #include "../utility/dvector.h"
 #include "../utility/executor.h"
 #include "db.h"
@@ -171,6 +172,7 @@ public:
 	void Initialize(const char* szPath);
 	void Initialize(const char* szPath, const StartParams&);
 
+	static bool ExtractTreasury(const Blob&, Treasury::Data&);
 	static void get_UtxoMappingPath(std::string&, const char*);
 
 	NodeProcessor();
