@@ -17,7 +17,7 @@
 #include "core/ecc_native.h"
 #include "proto.h"
 #include "../utility/logger.h"
-#include <iostream>
+#include <sstream>
 
 namespace beam {
 namespace proto {
