@@ -4355,6 +4355,21 @@ namespace beam::wallet
         }
     }
 
+    void WalletDB::visitEvents(Height min, std::function<bool(Height, ByteBuffer&&)>&& func) const
+    {
+        sqlite::Statement stm(this, "SELECT * FROM " EVENTS_NAME " WHERE Height >= ?1");
+        stm.bind(1, min);
+        while (stm.step())
+        {
+            Height h = 0;
+            ByteBuffer body;
+            stm.get(0, h);
+            stm.get(1, body);
+            if (!func(h, std::move(body)))
+                break;
+        }
+    }
+
     void WalletDB::Subscribe(IWalletDbObserver* observer)
     {
         if (std::find(m_subscribers.begin(), m_subscribers.end(), observer) == m_subscribers.end())

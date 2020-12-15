@@ -226,7 +226,7 @@ namespace beam::wallet
             if (!--m_OwnedNodesOnline)
             {
                 AbortEvents();
-                RequestBodies();
+                Rescan();
             }
         }
 
@@ -290,7 +290,7 @@ namespace beam::wallet
         m_WalletDB->deleteEventsFrom(Rules::HeightGenesis - 1);
         m_Extra.m_ShieldedOutputs = 0;
         storage::setVar(*m_WalletDB, s_szShieldedOutputs, 0);
-        RequestBodies(0, 1);
+        RequestTreasury();
         RequestEvents();
     }
 
@@ -1164,7 +1164,7 @@ namespace beam::wallet
             IWalletDB::Ptr m_WalletDB;
             struct Event
             {
-                Height m_Height;
+                Height m_Height = 0;
                 ByteBuffer m_Body;
             };
             std::queue<Event> m_Events;
@@ -1212,23 +1212,16 @@ namespace beam::wallet
     {
         RecognizerHandler h(*this, m_WalletDB->get_MasterKdf());
         NodeProcessor::Recognizer recognizer(h, m_Extra);
-        Block::Body block;
         try 
         {
-            Deserializer der;
             Height startHeight = r.m_StartHeight;
             for (const auto& b : r.m_Res.m_Bodies)
             {
-                der.reset(b.m_Perishable);
-                der& Cast::Down<Block::BodyBase>(block);
-                der& Cast::Down<TxVectors::Perishable>(block);
+                ProcessBody(b, startHeight, recognizer);
 
-                der.reset(b.m_Eternal);
-                der& Cast::Down<TxVectors::Eternal>(block);
-                HandleBlock(block);
-                recognizer.Recognize(block, startHeight, 0, false);
                 ++startHeight;
             }
+            
             if (!r.m_Res.m_Bodies.empty() && startHeight < r.m_Msg.m_Top.m_Height)
             {
                 RequestBodies(r.m_Msg.m_Height0, startHeight);
@@ -1236,7 +1229,6 @@ namespace beam::wallet
         }
         catch (const std::exception&)
         {
-            //LOG_WARNING()  << "Wallet: block deserialization failed";
             return;
         }
     }
@@ -1245,48 +1237,50 @@ namespace beam::wallet
     {
         RecognizerHandler h(*this, m_WalletDB->get_MasterKdf());
         NodeProcessor::Recognizer recognizer(h, m_Extra);
-        Block::Body block;
         try
         {
+            if (r.m_Height == 0)
             {
-                if (r.m_Height == 0)
-                {
-                    // handle treasury
-                    const Blob& blob = r.m_Res.m_Body.m_Eternal;
-                    Treasury::Data td;
-                    if (!NodeProcessor::ExtractTreasury(blob, td))
-                        return;
-
-                    for (size_t iG = 0; iG < td.m_vGroups.size(); iG++)
-                    {
-                        recognizer.Recognize(td.m_vGroups[iG].m_Data, r.m_Height, 0, false);
-                    }
-                    RequestBodies(Rules::get().HeightGenesis, Rules::get().HeightGenesis + 1);
+                // handle treasury
+                const Blob& blob = r.m_Res.m_Body.m_Eternal;
+                Treasury::Data td;
+                if (!NodeProcessor::ExtractTreasury(blob, td))
                     return;
-                }
-                
-                Deserializer der;
-                der.reset(r.m_Res.m_Body.m_Perishable);
-                der& Cast::Down<Block::BodyBase>(block);
-                der& Cast::Down<TxVectors::Perishable>(block);
 
-                der.reset(r.m_Res.m_Body.m_Eternal);
-                der& Cast::Down<TxVectors::Eternal>(block);
-
-                HandleBlock(block);
-
-                recognizer.Recognize(block, r.m_Height, 0, false);
-                if (r.m_Height < r.m_Msg.m_Top.m_Height)
+                for (size_t iG = 0; iG < td.m_vGroups.size(); iG++)
                 {
-                    RequestBodies(r.m_Height, r.m_Height+1);
+                    recognizer.Recognize(td.m_vGroups[iG].m_Data, r.m_Height, 0, false);
                 }
+                RequestBodies(0, Rules::get().HeightGenesis);
+                return;
+            }
+
+            ProcessBody(r.m_Res.m_Body, r.m_Height, recognizer);
+
+            if (r.m_Height < r.m_Msg.m_Top.m_Height)
+            {
+                RequestBodies(r.m_Height, r.m_Height+1);
             }
         }
         catch (const std::exception&)
         {
-            //LOG_WARNING() << "Wallet: block deserialization failed";
             return;
         }
+    }
+
+    void Wallet::ProcessBody(const proto::BodyBuffers& b, Height h, NodeProcessor::Recognizer& recognizer)
+    {
+        Block::Body block;
+        Deserializer der;
+        der.reset(b.m_Perishable);
+        der& Cast::Down<Block::BodyBase>(block);
+        der& Cast::Down<TxVectors::Perishable>(block);
+
+        der.reset(b.m_Eternal);
+        der& Cast::Down<TxVectors::Eternal>(block);
+        HandleBlock(block);
+        recognizer.Recognize(block, h, 0, false);
+        ProcessRecognizedEvents();
     }
 
     void Wallet::HandleBlock(TxVectors::Full& block)
@@ -1313,6 +1307,21 @@ namespace beam::wallet
         RequestBodies(currentHeight, currentHeight + 1);
     }
 
+    void Wallet::RequestTreasury()
+    {
+        if (m_OwnedNodesOnline)
+            return;
+
+        MyRequestBody::Ptr pReq(new MyRequestBody);
+
+        pReq->m_Msg.m_FlagP = proto::BodyBuffers::Full;
+        pReq->m_Msg.m_FlagE = proto::BodyBuffers::Full;
+
+        pReq->m_Height = 0;
+
+        PostReqUnique(*pReq);
+    }
+
     void Wallet::RequestBodies(Height currentHeight, Height startHeight)
     {
         if (!m_OwnedNodesOnline)
@@ -1320,18 +1329,6 @@ namespace beam::wallet
             Block::SystemState::Full newTip;
             m_WalletDB->get_History().get_Tip(newTip);
 
-            if (currentHeight < Rules::get().HeightGenesis)
-            {
-                MyRequestBody::Ptr pReq(new MyRequestBody);
-            
-                pReq->m_Msg.m_FlagP = proto::BodyBuffers::Full;
-                pReq->m_Msg.m_FlagE = proto::BodyBuffers::Full;
-            
-                pReq->m_Height = currentHeight;
-            
-                PostReqUnique(*pReq);
-                return;
-            }
             if (startHeight > newTip.m_Height)
                 return;
 
@@ -1383,6 +1380,34 @@ namespace beam::wallet
             DeleteReq(*m_PendingBody.begin());
     }
 
+    void Wallet::ProcessRecognizedEvents()
+    {
+        Block::SystemState::Full sTip;
+        m_WalletDB->get_History().get_Tip(sTip);
+
+        Height h = GetEventsHeightNext();
+        assert(h <= sTip.m_Height + 1);
+        if (h > sTip.m_Height)
+            return;
+
+        Serializer ser;
+        uint32_t count = 0;
+        m_WalletDB->visitEvents(h, [&](Height h, ByteBuffer&& body)
+        {
+            ser & h;
+            Blob b = body;
+            // skip index
+            b.n -= sizeof(NodeDB::EventIndexType);
+            ((const uint8_t*&)b.p) += sizeof(NodeDB::EventIndexType);
+            ser.WriteRaw(b.p, b.n);
+            ++count;
+            return true;
+        });
+        ByteBuffer events;
+        ser.swap_buf(events);
+        ProcessEvents(events, count + 1);
+    }
+
     void Wallet::RequestEvents()
     {
         if (!m_OwnedNodesOnline)
@@ -1416,7 +1441,7 @@ namespace beam::wallet
             DeleteReq(*m_PendingEvents.begin());
     }
 
-    void Wallet::OnRequestComplete(MyRequestEvents& r)
+    void Wallet::ProcessEvents(const ByteBuffer& events, uint32_t max)
     {
         struct MyParser
             :public proto::Event::IGroupParser
@@ -1445,10 +1470,10 @@ namespace beam::wallet
             }
 
         } p(*this);
-        
-        uint32_t nCount = p.Proceed(r.m_Res.m_Events);
 
-        if (nCount < r.m_Max)
+        uint32_t nCount = p.Proceed(events);
+
+        if (nCount < max)
         {
             Block::SystemState::Full sTip;
             m_WalletDB->get_History().get_Tip(sTip);
@@ -1460,6 +1485,11 @@ namespace beam::wallet
             SetEventsHeight(p.m_Height);
             RequestEvents(); // maybe more events pending
         }
+    }
+
+    void Wallet::OnRequestComplete(MyRequestEvents& r)
+    {
+        ProcessEvents(r.m_Res.m_Events, r.m_Max);
     }
 
     void Wallet::SetEventsHeight(Height h)

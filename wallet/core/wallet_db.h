@@ -558,6 +558,7 @@ namespace beam::wallet
         virtual void insertEvent(Height h, const Blob& body, const Blob& key) = 0;
         virtual void deleteEventsFrom(Height h) = 0;
         virtual void visitEvents(Height min, const Blob& key, std::function<bool(Height, ByteBuffer&&)>&& func) const = 0;
+        virtual void visitEvents(Height min, std::function<bool(Height, ByteBuffer&&)>&& func) const = 0;
 
         void addStatusInterpreterCreator(TxType txType, TxStatusInterpreter::Creator interpreterCreator);
         TxStatusInterpreter::Ptr getStatusInterpreter(const TxParameters& txParams) const;
@@ -720,6 +721,7 @@ namespace beam::wallet
         void insertEvent(Height h, const Blob& body, const Blob& key) override;
         void deleteEventsFrom(Height h) override;
         void visitEvents(Height min, const Blob& key, std::function<bool(Height, ByteBuffer&&)>&& func) const override;
+        void visitEvents(Height min, std::function<bool(Height, ByteBuffer&&)>&& func) const override;
 
     private:
         static std::shared_ptr<WalletDB> initBase(const std::string& path, const SecString& password, bool separateDBForPrivateData);

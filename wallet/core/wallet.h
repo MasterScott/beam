@@ -216,12 +216,16 @@ namespace beam::wallet
         void UpdateOnSynced(BaseTransaction::Ptr tx);
         void UpdateOnNextTip(BaseTransaction::Ptr tx);
         void SaveKnownState();
+        void ProcessBody(const proto::BodyBuffers& b, Height h, NodeProcessor::Recognizer& recoginzer);
         void HandleBlock(TxVectors::Full& block);
         void RequestBodies();
+        void RequestTreasury();
         void RequestBodies(Height currentHeight, Height startHeight);
         void AbortBodiesRequests();
+        void ProcessRecognizedEvents();
         void RequestEvents();
         void AbortEvents();
+        void ProcessEvents(const ByteBuffer& events, uint32_t max);
         void ProcessEventUtxo(const CoinID&, Height h, Height hMaturity, bool bAdd, const Output::User& user);
         void ProcessEventAsset(const proto::Event::AssetCtl& assetCtl, Height h);
         void SetEventsHeight(Height);
