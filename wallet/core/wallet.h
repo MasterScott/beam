@@ -222,10 +222,9 @@ namespace beam::wallet
         void RequestTreasury();
         void RequestBodies(Height currentHeight, Height startHeight);
         void AbortBodiesRequests();
-        void ProcessRecognizedEvents();
         void RequestEvents();
         void AbortEvents();
-        void ProcessEvents(const ByteBuffer& events, uint32_t max);
+        void ProcessEventUtxo(const proto::Event::Utxo& utxoEvt, Height h);
         void ProcessEventUtxo(const CoinID&, Height h, Height hMaturity, bool bAdd, const Output::User& user);
         void ProcessEventAsset(const proto::Event::AssetCtl& assetCtl, Height h);
         void SetEventsHeight(Height);

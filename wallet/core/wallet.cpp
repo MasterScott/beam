@@ -454,7 +454,7 @@ namespace beam::wallet
 
     bool Wallet::MyRequestStateSummary::operator < (const MyRequestStateSummary& x) const
     {
-        return this < &x;
+        return false;
     }
 
     bool Wallet::MyRequestShieldedOutputsAt::operator < (const MyRequestShieldedOutputsAt& x) const
@@ -1132,12 +1132,7 @@ namespace beam::wallet
             case proto::Event::Type::Utxo:
             {
                 auto event = Cast::Up<const proto::Event::Utxo&>(evt);
-                // filter-out false positives
-                if (!m_Wallet.m_WalletDB->IsRecoveredMatch(event.m_Cid, event.m_Commitment))
-                    return;
-
-                bool bAdd = 0 != (proto::Event::Flags::Add & event.m_Flags);
-                m_Wallet.ProcessEventUtxo(event.m_Cid, h, event.m_Maturity, bAdd, event.m_User);
+                m_Wallet.ProcessEventUtxo(event, h);
             }break;
             case proto::Event::Type::Shielded:
             {
@@ -1280,7 +1275,8 @@ namespace beam::wallet
         der& Cast::Down<TxVectors::Eternal>(block);
         HandleBlock(block);
         recognizer.Recognize(block, h, 0, false);
-        ProcessRecognizedEvents();
+        SetEventsHeight(h);
+        storage::setVar(*m_WalletDB, s_szShieldedOutputs, m_Extra.m_ShieldedOutputs);
     }
 
     void Wallet::HandleBlock(TxVectors::Full& block)
@@ -1380,34 +1376,6 @@ namespace beam::wallet
             DeleteReq(*m_PendingBody.begin());
     }
 
-    void Wallet::ProcessRecognizedEvents()
-    {
-        Block::SystemState::Full sTip;
-        m_WalletDB->get_History().get_Tip(sTip);
-
-        Height h = GetEventsHeightNext();
-        assert(h <= sTip.m_Height + 1);
-        if (h > sTip.m_Height)
-            return;
-
-        Serializer ser;
-        uint32_t count = 0;
-        m_WalletDB->visitEvents(h, [&](Height h, ByteBuffer&& body)
-        {
-            ser & h;
-            Blob b = body;
-            // skip index
-            b.n -= sizeof(NodeDB::EventIndexType);
-            ((const uint8_t*&)b.p) += sizeof(NodeDB::EventIndexType);
-            ser.WriteRaw(b.p, b.n);
-            ++count;
-            return true;
-        });
-        ByteBuffer events;
-        ser.swap_buf(events);
-        ProcessEvents(events, count + 1);
-    }
-
     void Wallet::RequestEvents()
     {
         if (!m_OwnedNodesOnline)
@@ -1441,7 +1409,7 @@ namespace beam::wallet
             DeleteReq(*m_PendingEvents.begin());
     }
 
-    void Wallet::ProcessEvents(const ByteBuffer& events, uint32_t max)
+    void Wallet::OnRequestComplete(MyRequestEvents& r)
     {
         struct MyParser
             :public proto::Event::IGroupParser
@@ -1471,9 +1439,9 @@ namespace beam::wallet
 
         } p(*this);
 
-        uint32_t nCount = p.Proceed(events);
+        uint32_t nCount = p.Proceed(r.m_Res.m_Events);
 
-        if (nCount < max)
+        if (nCount < r.m_Max)
         {
             Block::SystemState::Full sTip;
             m_WalletDB->get_History().get_Tip(sTip);
@@ -1485,11 +1453,6 @@ namespace beam::wallet
             SetEventsHeight(p.m_Height);
             RequestEvents(); // maybe more events pending
         }
-    }
-
-    void Wallet::OnRequestComplete(MyRequestEvents& r)
-    {
-        ProcessEvents(r.m_Res.m_Events, r.m_Max);
     }
 
     void Wallet::SetEventsHeight(Height h)
@@ -1508,6 +1471,17 @@ namespace beam::wallet
         Height h;
         var.Export(h);
         return h;
+    }
+
+    void Wallet::ProcessEventUtxo(const proto::Event::Utxo& evt, Height h)
+    {
+        CoinID cid = evt.m_Cid;
+        // filter-out false positives
+        if (!m_WalletDB->IsRecoveredMatch(cid, evt.m_Commitment))
+            return;
+
+        bool bAdd = 0 != (proto::Event::Flags::Add & evt.m_Flags);
+        ProcessEventUtxo(evt.m_Cid, h, evt.m_Maturity, bAdd, evt.m_User);
     }
 
     void Wallet::ProcessEventUtxo(const CoinID& cid, Height h, Height hMaturity, bool bAdd, const Output::User& user)
