@@ -26,6 +26,7 @@
 #include "../utility/logger_checkpoints.h"
 
 #include "pow/external_pow.h"
+#include <sstream>
 
 namespace beam {
 
