@@ -217,7 +217,7 @@ namespace beam::wallet
         void UpdateOnNextTip(BaseTransaction::Ptr tx);
         void SaveKnownState();
         void ProcessBody(const proto::BodyBuffers& b, Height h, NodeProcessor::Recognizer& recoginzer);
-        void HandleBlock(TxVectors::Full& block);
+        void PreprocessBlock(TxVectors::Full& block);
         void RequestBodies();
         void RequestTreasury();
         void RequestBodies(Height currentHeight, Height startHeight);

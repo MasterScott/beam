@@ -1281,14 +1281,15 @@ namespace beam::wallet
 
         der.reset(b.m_Eternal);
         der& Cast::Down<TxVectors::Eternal>(block);
-        HandleBlock(block);
+        PreprocessBlock(block);
         recognizer.Recognize(block, h, 0, false);
         SetEventsHeight(h);
         storage::setVar(*m_WalletDB, s_szShieldedOutputs, m_Extra.m_ShieldedOutputs);
     }
 
-    void Wallet::HandleBlock(TxVectors::Full& block)
+    void Wallet::PreprocessBlock(TxVectors::Full& block)
     {
+        // In this method we emulate work performed by NodeProcessor::HandleValidatedBlock
         // TODO: improve this
         for (auto& input : block.m_vInputs)
         {
@@ -1303,6 +1304,20 @@ namespace beam::wallet
                 return true;
             });
         }
+        // remove asset kernels, we don't support them
+        auto& kernels = block.m_vKernels;
+        kernels.erase(std::remove_if(kernels.begin(), kernels.end(), [](const auto& k)
+        {
+            switch (k->get_Subtype())
+            {
+            case TxKernel::Subtype::AssetCreate:
+            case TxKernel::Subtype::AssetDestroy:
+            case TxKernel::Subtype::AssetEmit:
+                return true;
+            default:
+                return false;
+            }
+        }), kernels.end());
     }
 
     void Wallet::RequestBodies()
