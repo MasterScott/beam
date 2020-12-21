@@ -1225,7 +1225,7 @@ namespace beam::wallet
                 ++startHeight;
             }
             
-            if (!r.m_Res.m_Bodies.empty() && startHeight < r.m_Msg.m_Top.m_Height)
+            if (!r.m_Res.m_Bodies.empty())
             {
                 RequestBodies(r.m_Msg.m_Height0, startHeight);
             }
@@ -1345,6 +1345,9 @@ namespace beam::wallet
     {
         if (!m_OwnedNodesOnline)
         {
+            if (!m_PendingBodyPack.empty() || !m_PendingBody.empty())
+                return;
+
             Block::SystemState::Full newTip;
             m_WalletDB->get_History().get_Tip(newTip);
 
