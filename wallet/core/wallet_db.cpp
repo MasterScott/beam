@@ -504,6 +504,22 @@ namespace beam::wallet
             }
             return coins;
         }
+
+        Height DeduceTxProofHeightImpl(const IWalletDB& walletDB, const TxID& txID, TxType type)
+        {
+            Height height = 0;
+
+            if (type == TxType::AssetInfo)
+            {
+                storage::getTxParameter(walletDB, txID, TxParameterID::AssetConfirmedHeight, height);
+            }
+            else
+            {
+                storage::getTxParameter(walletDB, txID, TxParameterID::KernelProofHeight, height);
+            }
+
+            return height;
+        }
     }
 
     namespace sqlite
@@ -3350,7 +3366,7 @@ namespace beam::wallet
         notifyShieldedCoinsChanged(ChangeAction::Updated, v);
     }
 
-    void WalletDB::visitTx(std::function<bool(TxType, TxStatus)> filter, std::function<void(const TxDescription&)> func) const
+    void WalletDB::visitTx(std::function<bool(TxType, TxStatus, Asset::ID, Height)> filter, std::function<void(const TxDescription&)> func) const
     {
         using TxData = std::pair<TxID, Timestamp>;
         auto pred = [](const TxData& left, const TxData& right) {return left.second < right.second; };
@@ -3375,17 +3391,25 @@ namespace beam::wallet
 
         const char* gtParamReq = "SELECT * FROM " TX_PARAMS_NAME " WHERE txID=?1;";
         sqlite::Statement stm2(this, gtParamReq);
-        sqlite::Statement stm3(this, "SELECT * FROM " TX_PARAMS_NAME " WHERE txID=?1 AND subTxID=?2 AND paramID=?3;");
+        sqlite::Statement stm3(this, "SELECT value FROM " TX_PARAMS_NAME " WHERE txID=?1 AND subTxID=?2 AND paramID=?3;");
 
         while (!transactions.empty())
         {
             TxID txID = transactions.top().first;
             transactions.pop();
-            TxType type;
-            TxStatus status;
+            TxType type = TxType::Simple;
+            TxStatus status = TxStatus::Pending;
+
             if (!getTxParameterImpl(txID, kDefaultSubTxID, TxParameterID::TransactionType, type, stm3) ||
-                !getTxParameterImpl(txID, kDefaultSubTxID, TxParameterID::Status, status, stm3) ||
-                !filter(type, status))
+                !getTxParameterImpl(txID, kDefaultSubTxID, TxParameterID::Status, status, stm3))
+            {
+                continue;
+            }
+
+            Height h = DeduceTxProofHeightImpl(*this, txID, type);
+            Asset::ID assetID = Asset::s_InvalidID;
+            getTxParameterImpl(txID, kDefaultSubTxID, TxParameterID::AssetID, assetID, stm3);
+            if (!filter(type, status, assetID, h))
             {
                 continue;
             }
@@ -4507,7 +4531,7 @@ namespace beam::wallet
             }
         }
 
-        sqlite::Statement stm(this, "SELECT * FROM " TX_PARAMS_NAME " WHERE txID=?1 AND subTxID=?2 AND paramID=?3;");
+        sqlite::Statement stm(this, "SELECT value FROM " TX_PARAMS_NAME " WHERE txID=?1 AND subTxID=?2 AND paramID=?3;");
         return getTxParameterImpl(txID, subTxID, paramID, blob, stm);
     }
 
@@ -4520,10 +4544,7 @@ namespace beam::wallet
 
         if (stm.step())
         {
-            TxParameter parameter = {};
-            int colIdx = 0;
-            ENUM_TX_PARAMS_FIELDS(STM_GET_LIST, NOSEP, parameter);
-            blob = move(parameter.m_value);
+            stm.get(0, blob);
             insertParameterToCache(txID, subTxID, paramID, blob);
             return true;
         }
@@ -5260,18 +5281,7 @@ namespace beam::wallet
 
         Height DeduceTxProofHeight(const IWalletDB& walletDB, const TxDescription &tx)
         {
-            Height height = 0;
-
-            if (tx.m_txType == TxType::AssetInfo)
-            {
-                storage::getTxParameter(walletDB, tx.m_txId, TxParameterID::AssetConfirmedHeight, height);
-            }
-            else
-            {
-                storage::getTxParameter(walletDB, tx.m_txId, TxParameterID::KernelProofHeight, height);
-            }
-
-            return height;
+            return DeduceTxProofHeightImpl(walletDB, tx.m_txId, tx.m_txType);
         }
 
         Height DeduceTxDisplayHeight(const IWalletDB& walletDB, const TxDescription &tx)
@@ -5312,6 +5322,7 @@ namespace beam::wallet
                 const string SubTransactionId = "SubTransactionId";
                 const string ParameterId = "ParameterId";
                 const string Value = "Value";
+                const string Address = "Address";
             }
             
             bool ImportAddressesFromJson(IWalletDB& db, const json& obj, const string& nodeName)
@@ -5355,6 +5366,10 @@ namespace beam::wallet
                                 {
                                     address.m_Identity = Blob(buf);
                                 }
+                            }
+                            if (auto it = jsonAddress.find(Fields::Address); it != jsonAddress.end())
+                            {
+                                address.m_Address = it->get<std::string>();
                             }
                             db.saveAddress(address);
 
@@ -5499,7 +5514,8 @@ namespace beam::wallet
                             {Fields::Label, address.m_label},
                             {Fields::CreationTime, address.m_createTime},
                             {Fields::Duration, address.m_duration},
-                            {Fields::Category, address.m_category}
+                            {Fields::Category, address.m_category},
+                            {Fields::Address,  address.m_Address}
                         }
                     );
                     if (address.m_Identity != Zero)

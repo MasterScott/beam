@@ -234,7 +234,6 @@ namespace beam::wallet
             if (!--m_OwnedNodesOnline)
             {
                 AbortEvents();
-                Rescan();
             }
         }
 
@@ -2032,6 +2031,11 @@ namespace beam::wallet
         pVal->m_Msg.m_Height = h;
         pVal->m_callback = std::move(onRequestComplete);
         PostReqUnique(*pVal);
+    }
+
+    bool Wallet::IsConnectedToOwnNode() const
+    {
+        return m_OwnedNodesOnline > 0;
     }
 
     void Wallet::RestoreTransactionFromShieldedCoin(ShieldedCoin& coin)

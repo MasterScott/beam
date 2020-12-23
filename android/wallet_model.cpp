@@ -94,7 +94,12 @@ namespace
 
         setStringField(env, TxDescriptionClass, tx, "id", to_hex(txDescription.m_txId.data(), txDescription.m_txId.size()));
         setLongField(env, TxDescriptionClass, tx, "amount", txDescription.m_amount);
-        setLongField(env, TxDescriptionClass, tx, "fee", shieldedFee);
+        if(shieldedFee == 0) {
+            setLongField(env, TxDescriptionClass, tx, "fee", txDescription.m_fee);
+        }
+        else {
+            setLongField(env, TxDescriptionClass, tx, "fee", shieldedFee);
+        }
         setLongField(env, TxDescriptionClass, tx, "minHeight", txDescription.m_minHeight);
 
         setStringField(env, TxDescriptionClass, tx, "peerId", to_string(txDescription.m_peerId));
@@ -181,6 +186,7 @@ namespace
             setLongField(env, UtxoClass, utxo, "id", coin.m_spentHeight);
             setStringField(env, UtxoClass, utxo, "stringId", idString);
             setLongField(env, UtxoClass, utxo, "amount", coin.m_CoinID.m_Value);
+            setLongField(env, UtxoClass, utxo, "txoID", coin.m_TxoID);
 
             switch (coin.m_Status)
             {
@@ -836,6 +842,11 @@ void WalletModel::onGetAddress(const beam::wallet::WalletID& wid, const boost::o
 void WalletModel::onShieldedCoinChanged(beam::wallet::ChangeAction action, const std::vector<beam::wallet::ShieldedCoin>& items) 
 {
     LOG_DEBUG() << "onShieldedCoinChanged()";
+
+        for (const auto& coin : items)
+        {
+            shieldedCoins[coin.m_TxoID] = coin;
+        }
 
     JNIEnv* env = Android_JNI_getEnv();
 

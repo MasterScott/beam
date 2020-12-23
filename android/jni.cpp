@@ -64,7 +64,7 @@ namespace
     static beam::wallet::TxParameters _txParameters;
 
     static uint8_t m_mpLockTimeLimit = 0;
-    static ByteBuffer lastVouchers;
+    static ShieldedVoucherList lastVouchers;
     static std::string lastWalledId("");
 
     void initLogger(const string& appData, const string& appVersion)
@@ -274,33 +274,23 @@ JNIEXPORT jobject JNICALL BEAM_JAVA_WALLET_INTERFACE(getTransactionParameters)(J
  JNIEXPORT jstring JNICALL BEAM_JAVA_WALLET_INTERFACE(generateOfflineAddress)(JNIEnv *env, jobject thiz, jlong amount, jstring walletId)
  {
     LOG_DEBUG() << "generateOfflineAddress()";
-
-    uint64_t bAmount = amount;
-        
-    auto address = walletDB->getAddress(JString(env, walletId).value());
-    
-   // auto vouchers = walletModel->generateVouchers(address->m_OwnID, 10);
+            
     auto id = JString(env, walletId).value();
 
-    if (lastWalledId.compare(id) == 0) {
-        lastWalledId = id;
-        lastVouchers = walletModel->generateVouchers(address->m_OwnID, 10);
-    }
+    auto address = walletDB->getAddress(JString(env, walletId).value());
 
-    TxParameters offlineParameters;
-    offlineParameters.SetParameter(TxParameterID::TransactionType, beam::wallet::TxType::PushTransaction);
-    offlineParameters.SetParameter(TxParameterID::ShieldedVoucherList, lastVouchers);
-    offlineParameters.SetParameter(TxParameterID::PeerID, address->m_walletID);
-    offlineParameters.SetParameter(TxParameterID::PeerWalletIdentity, address->m_Identity);
-    offlineParameters.SetParameter(TxParameterID::PeerOwnID, address->m_OwnID);
-    offlineParameters.SetParameter(TxParameterID::IsPermanentPeerID, true);
-    if (bAmount > 0)
-    {
-        offlineParameters.SetParameter(TxParameterID::Amount, bAmount);
-    }
+    // if (lastWalledId.compare(id) == 0) {
+    //     lastWalledId = id;
+    // }
 
-    auto token = to_string(offlineParameters);
-    jstring tokenString = env->NewStringUTF(token.c_str());
+    uint64_t bAmount = amount;
+
+    auto v = GenerateVoucherList(walletDB->get_KeyKeeper(), address->m_OwnID, 10);
+
+    auto offlineAddress = GenerateOfflineAddress(*address, bAmount, v);
+    
+    jstring tokenString = env->NewStringUTF(offlineAddress.c_str());
+
     return tokenString;
  }
 
@@ -309,22 +299,11 @@ JNIEXPORT jobject JNICALL BEAM_JAVA_WALLET_INTERFACE(getTransactionParameters)(J
     LOG_DEBUG() << "generateRegularAddress()";
 
     uint64_t bAmount = amount;
-        
+
     auto address = walletDB->getAddress(JString(env, walletId).value());
+    auto regularAddress = GenerateRegularAddress(*address, bAmount, isPermanentAddress, std::string(BEAM_LIB_VERSION));
     
-    TxParameters params;
-    params.SetParameter(TxParameterID::LibraryVersion, std::string(BEAM_LIB_VERSION));
-    if (bAmount > 0) {
-        params.SetParameter(TxParameterID::Amount, bAmount);
-    }
-    params.SetParameter(TxParameterID::PeerID, address->m_walletID);
-    params.SetParameter(TxParameterID::PeerWalletIdentity, address->m_Identity);
-    params.SetParameter(TxParameterID::IsPermanentPeerID, isPermanentAddress);
-    params.SetParameter(TxParameterID::TransactionType, TxType::Simple);
-    params.DeleteParameter(TxParameterID::Voucher);
-    
-    auto token = to_string(params);
-    jstring tokenString = env->NewStringUTF(token.c_str());
+    jstring tokenString = env->NewStringUTF(regularAddress.c_str());
     return tokenString;
  }
 
@@ -338,7 +317,6 @@ JNIEXPORT jobject JNICALL BEAM_JAVA_WALLET_INTERFACE(getTransactionParameters)(J
     uint64_t bAmount = amount;
 
     auto vouchers = GenerateVoucherList(walletDB->get_KeyKeeper(), address->m_OwnID, 1);
-
 
      if (!vouchers.empty())
       {
@@ -1104,6 +1082,14 @@ JNIEXPORT void JNICALL BEAM_JAVA_WALLET_INTERFACE(getMaxPrivacyLockTimeLimitHour
     {
         m_mpLockTimeLimit = limit;
     });
+}
+
+JNIEXPORT jlong JNICALL BEAM_JAVA_WALLET_INTERFACE(getMaturityHours)(JNIEnv *env, jobject thiz, jlong id)
+{
+    uint64_t _id = id;
+    auto coin = walletModel->shieldedCoins[_id];
+    auto time = walletModel->getMaturityHoursLeft(coin);
+    return time;
 }
 
 JNIEXPORT jlong JNICALL BEAM_JAVA_WALLET_INTERFACE(getMaxPrivacyLockTimeLimitHours)(JNIEnv *env, jobject thiz)
