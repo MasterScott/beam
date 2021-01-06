@@ -199,9 +199,21 @@ namespace beam::wallet::lelantus
     void PushTransaction::RollbackTx()
     {
         LOG_INFO() << m_Context << " Transaction failed. Rollback...";
-        m_Context.GetWalletDB()->restoreCoinsSpentByTx(GetTxID());
-        m_Context.GetWalletDB()->deleteCoinsCreatedByTx(GetTxID());
-        GetWalletDB()->deleteShieldedCoinsCreatedByTx(GetTxID());
+        try
+        {
+            const auto& txID = GetTxID();
+            GetWalletDB()->restoreCoinsSpentByTx(txID);
+            LOG_DEBUG() << "1";
+            GetWalletDB()->deleteCoinsCreatedByTx(txID);
+            LOG_DEBUG() << "2";
+            GetWalletDB()->deleteShieldedCoinsCreatedByTx(txID);
+            LOG_DEBUG() << "3";
+        }
+        catch (...)
+        {
+            LOG_ERROR() << m_Context << "PushTransaction::RollbackTx()";
+        }
+        
     }
 
 } // namespace beam::wallet::lelantus
