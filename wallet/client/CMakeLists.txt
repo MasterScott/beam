@@ -22,10 +22,14 @@ target_sources(wallet_client
         extensions/notifications/notification_center.cpp
 )
 
-target_link_libraries(wallet_client 
-    PUBLIC
-        wallet
-)
+if(EMSCRIPTEN)
+    message("No link wallet")
+else()
+    target_link_libraries(wallet_client 
+        PUBLIC
+            wallet
+    )
+endif()
 
 target_compile_features(wallet_client PUBLIC cxx_std_17)
 
