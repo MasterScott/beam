@@ -23,7 +23,7 @@ target_sources(wallet_client
 )
 
 if(EMSCRIPTEN)
-    message("No link wallet")
+    target_compile_definitions(wallet_client PUBLIC EMSCRIPTEN)
 else()
     target_link_libraries(wallet_client 
         PUBLIC
